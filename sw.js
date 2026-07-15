@@ -1,13 +1,20 @@
 /*
   QRShield service worker
-  - Caches the app shell so the scanner UI works offline / installs as a PWA.
+  - Caches the app shell so the scanner UI still works offline / installs as a PWA.
+  - NETWORK-FIRST for same-origin files: every request tries the real network
+    first, so a new deploy shows up immediately instead of being masked by an
+    old cached copy. The cache is only used as a fallback when there's no
+    network at all.
   - Deliberately does NOT register push, notification, or background-sync
     handlers — this app never needs to notify the user.
   - Never caches or intercepts requests to the destinations found inside
     scanned QR codes; it only manages this app's own static files.
+
+  NOTE: bump CACHE_NAME (e.g. v2 -> v3) whenever you want to force every
+  previously-installed copy of this app to drop its old offline cache.
 */
 
-const CACHE_NAME = "qrshield-shell-v1";
+const CACHE_NAME = "qrshield-shell-v2";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -39,28 +46,25 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Cache-first for same-origin app-shell files, network-first fallback for
-// anything else (e.g. the jsQR CDN script), never for cross-origin
-// destinations a user might choose to open from a scan result.
+// Network-first for same-origin app-shell files: always try to fetch the
+// live version, update the cache with whatever comes back, and only serve
+// the cached copy if the network request fails outright (offline).
+// Cross-origin requests (e.g. the jsQR CDN library) are left alone entirely.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
   const isSameOrigin = url.origin === self.location.origin;
+  if (!isSameOrigin) return;
 
-  if (isSameOrigin) {
-    event.respondWith(
-      caches.match(req).then((cached) => {
-        if (cached) return cached;
-        return fetch(req).then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          return res;
-        }).catch(() => cached);
+  event.respondWith(
+    fetch(req)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        return res;
       })
-    );
-  }
-  // Cross-origin requests (e.g. the jsQR CDN library) fall through to the
-  // network normally; nothing scanned is ever proxied through here.
+      .catch(() => caches.match(req))
+  );
 });
