@@ -61,7 +61,7 @@ $("#navSettings").addEventListener("click", () => showView("settings"));
    Theme (auto / light / dark)
    =========================================================== */
 function applyTheme(theme){
-  document.body.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme;
   $$(".theme-btn").forEach(b => b.classList.toggle("is-active", b.dataset.themeChoice === theme));
 }
 applyTheme(getSetting("theme", "auto"));

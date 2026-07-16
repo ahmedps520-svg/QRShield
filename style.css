@@ -36,7 +36,7 @@
 /* ---------- light theme overrides ---------- */
 /* Auto: follow system preference. Manual: explicit [data-theme] wins. */
 @media (prefers-color-scheme: light){
-  body[data-theme="auto"]{
+  html[data-theme="auto"]{
     --black-0: #f6f4f5;
     --black-1: #ffffff;
     --black-2: #f1eef0;
@@ -47,7 +47,7 @@
     --text-lo: #8b8790;
   }
 }
-body[data-theme="light"]{
+html[data-theme="light"]{
   --black-0: #f6f4f5;
   --black-1: #ffffff;
   --black-2: #f1eef0;
@@ -60,6 +60,9 @@ body[data-theme="light"]{
 
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
+html{
+  background: var(--black-0);
+}
 
 /* The [hidden] attribute must always win over any component's own display
    rule (e.g. .btn / .scanner-blocked setting display:flex) — otherwise an
@@ -273,8 +276,11 @@ button{ font-family: inherit; }
 }
 
 .scanner-controls{
-  display:flex; gap:10px; margin-top:16px;
+  display:flex; flex-wrap:wrap; gap:10px; margin-top:16px;
 }
+.scanner-controls #startBtn{ flex: 1 1 100%; }
+.scanner-controls #uploadBtn{ flex: 1 1 auto; min-width:0; }
+.scanner-controls #torchBtn{ flex: none; }
 
 .privacy-note{
   display:flex; gap:8px; align-items:flex-start;
@@ -328,7 +334,7 @@ button{ font-family: inherit; }
   border: 1px solid rgba(255,45,77,0.2);
 }
 .btn-icon{
-  flex:none; width:46px; padding:0;
+  flex:none; width:46px; height:46px; padding:0;
   color: var(--text-hi);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--hairline);
