@@ -61,6 +61,11 @@ body[data-theme="light"]{
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
 
+/* The [hidden] attribute must always win over any component's own display
+   rule (e.g. .btn / .scanner-blocked setting display:flex) — otherwise an
+   element can stay visibly on-screen even after JS sets hidden=true. */
+[hidden]{ display:none !important; }
+
 body{
   margin:0;
   font-family: var(--font-body);
