@@ -18,7 +18,7 @@
   previously-installed copy of this app to drop its old offline cache.
 */
 
-const CACHE_NAME = "qrshield-shell-v3";
+const CACHE_NAME = "qrshield-shell-v4";
 const SHELL_FILES = [
   "./",
   "./index.html",

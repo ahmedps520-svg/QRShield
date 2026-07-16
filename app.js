@@ -55,6 +55,7 @@ function showView(name){
 }
 
 $("#navScan").addEventListener("click", () => showView("scan"));
+$("#navGenerate").addEventListener("click", () => showView("generate"));
 $("#navSettings").addEventListener("click", () => showView("settings"));
 
 /* ===========================================================
@@ -406,7 +407,8 @@ const VERDICT_META = {
 const ICONS = {
   check: '<svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>',
   warn:  '<svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
-  danger:'<svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-6h-2v4h2v-4z" opacity="0"/><path fill="currentColor" d="M12 2c-.7 0-1.3.4-1.7 1L1.4 19a2 2 0 0 0 1.7 3h17.8a2 2 0 0 0 1.7-3L13.7 3A2 2 0 0 0 12 2zm0 6c.6 0 1 .4 1 1v5a1 1 0 1 1-2 0V9c0-.6.4-1 1-1zm0 9a1.3 1.3 0 1 1 0-2.6 1.3 1.3 0 0 1 0 2.6z"/></svg>'
+  danger:'<svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-6h-2v4h2v-4z" opacity="0"/><path fill="currentColor" d="M12 2c-.7 0-1.3.4-1.7 1L1.4 19a2 2 0 0 0 1.7 3h17.8a2 2 0 0 0 1.7-3L13.7 3A2 2 0 0 0 12 2zm0 6c.6 0 1 .4 1 1v5a1 1 0 1 1-2 0V9c0-.6.4-1 1-1zm0 9a1.3 1.3 0 1 1 0-2.6 1.3 1.3 0 0 1 0 2.6z"/></svg>',
+  spinner: '<svg class="spin-icon" viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="38 56"/></svg>'
 };
 
 let lastAnalysis = null;
@@ -460,6 +462,7 @@ function renderResult(parsed, result){
   if (result.verdict === "danger") vibrate([60, 40, 60, 40, 120]);
   else if (result.verdict === "caution") vibrate([50]);
   else vibrate([20]);
+  playScanSound(result.verdict);
 }
 
 $("#proceedBtn").addEventListener("click", () => {
@@ -568,10 +571,134 @@ $("#clearHistoryBtn").addEventListener("click", () => {
    =========================================================== */
 const strictToggle = $("#strictToggle");
 const hapticToggle = $("#hapticToggle");
+const soundToggle = $("#soundToggle");
 strictToggle.checked = getSetting("strict", true);
 hapticToggle.checked = getSetting("haptic", true);
+soundToggle.checked = getSetting("sound", true);
 strictToggle.addEventListener("change", () => setSetting("strict", strictToggle.checked));
 hapticToggle.addEventListener("change", () => setSetting("haptic", hapticToggle.checked));
+soundToggle.addEventListener("change", () => setSetting("sound", soundToggle.checked));
+
+/* ===========================================================
+   Scan feedback sounds (synthesized — no audio file needed)
+   =========================================================== */
+let audioCtx = null;
+function ensureAudioCtx(){
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx) audioCtx = new Ctx();
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+function beepTone(freq, startOffset, duration, ctx){
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  const t0 = ctx.currentTime + startOffset;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.22, t0 + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+
+function playScanSound(verdict){
+  if (!getSetting("sound", true)) return;
+  const ctx = ensureAudioCtx();
+  if (!ctx) return;
+  try {
+    if (verdict === "danger") {
+      beepTone(520, 0, 0.11, ctx);
+      beepTone(340, 0.13, 0.16, ctx);
+    } else if (verdict === "caution") {
+      beepTone(700, 0, 0.09, ctx);
+      beepTone(700, 0.11, 0.09, ctx);
+    } else {
+      beepTone(920, 0, 0.14, ctx);
+    }
+  } catch (e) { /* audio unavailable — silently skip */ }
+}
+
+/* ===========================================================
+   QR code generation
+   =========================================================== */
+const generateInput = $("#generateInput");
+const generateCanvas = $("#generateCanvas");
+const generatePreviewEmpty = $("#generatePreviewEmpty");
+const generateDownloadBtn = $("#generateDownloadBtn");
+const generateCopyBtn = $("#generateCopyBtn");
+let generateDebounce = null;
+let generatedValue = "";
+
+function runGenerate(){
+  const value = generateInput.value.trim();
+  if (!value) {
+    generateCanvas.hidden = true;
+    generatePreviewEmpty.hidden = false;
+    generateDownloadBtn.disabled = true;
+    generateCopyBtn.disabled = true;
+    generatedValue = "";
+    return;
+  }
+  if (typeof window.QRious !== "function") {
+    toast("QR generator failed to load — check your connection and reload.");
+    return;
+  }
+  try {
+    generateCanvas.hidden = false;
+    generatePreviewEmpty.hidden = true;
+    new window.QRious({
+      element: generateCanvas,
+      value: value,
+      size: 560,
+      level: "M",
+      background: "#ffffff",
+      foreground: "#0a0a0a",
+      padding: 28
+    });
+    // restart the pop-in animation on every regeneration
+    generateCanvas.classList.remove("qr-generated");
+    void generateCanvas.offsetWidth; // force reflow so the class removal registers
+    generateCanvas.classList.add("qr-generated");
+
+    generatedValue = value;
+    generateDownloadBtn.disabled = false;
+    generateCopyBtn.disabled = false;
+  } catch (e) {
+    toast("Couldn't generate a QR code for that content.");
+  }
+}
+
+generateInput.addEventListener("input", () => {
+  clearTimeout(generateDebounce);
+  generateDebounce = setTimeout(runGenerate, 260);
+});
+
+generateDownloadBtn.addEventListener("click", () => {
+  if (!generatedValue) return;
+  const a = document.createElement("a");
+  a.download = "qrshield-code.png";
+  a.href = generateCanvas.toDataURL("image/png");
+  a.click();
+  toast("Downloaded");
+});
+
+generateCopyBtn.addEventListener("click", async () => {
+  if (!generatedValue) return;
+  try {
+    generateCanvas.toBlob(async (blob) => {
+      if (!blob) throw new Error("no blob");
+      await navigator.clipboard.write([ new ClipboardItem({ "image/png": blob }) ]);
+      toast("Image copied to clipboard");
+    }, "image/png");
+  } catch (e) {
+    toast("Copy isn't supported in this browser — try Download instead.");
+  }
+});
 
 /* ===========================================================
    Camera + decoding
@@ -646,6 +773,7 @@ async function startScanning(){
   $("#startBtn").textContent = "Stop scanning";
   scanning = true;
   setupTorch();
+  setupZoom();
   tick();
 }
 
@@ -691,6 +819,69 @@ $("#torchBtn").addEventListener("click", async () => {
   }
 });
 
+/* ---------- pinch-to-zoom ---------- */
+let zoomTrack = null;
+let zoomCaps = null; // {min, max, step} when the camera supports real optical/digital zoom
+let currentZoom = 1;
+let pinchBaseDist = null;
+let pinchBaseZoom = 1;
+
+function setupZoom(){
+  zoomTrack = null;
+  zoomCaps = null;
+  currentZoom = 1;
+  video.style.transform = "";
+
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track || typeof track.getCapabilities !== "function") return;
+  let caps;
+  try { caps = track.getCapabilities(); } catch(e){ return; }
+  if (caps && caps.zoom) {
+    zoomTrack = track;
+    zoomCaps = caps.zoom;
+    currentZoom = (caps.zoom.min != null) ? caps.zoom.min : 1;
+  }
+}
+
+function setZoom(z){
+  if (zoomTrack && zoomCaps) {
+    z = Math.min(zoomCaps.max, Math.max(zoomCaps.min, z));
+    currentZoom = z;
+    zoomTrack.applyConstraints({ advanced: [{ zoom: z }] }).catch(() => {});
+  } else {
+    z = Math.min(3, Math.max(1, z));
+    currentZoom = z;
+    video.style.transform = z > 1 ? `scale(${z})` : "";
+  }
+}
+
+function touchDistance(touches){
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+const scannerFrameEl = $("#scannerFrame");
+scannerFrameEl.addEventListener("touchstart", (e) => {
+  if (scanning && e.touches.length === 2) {
+    pinchBaseDist = touchDistance(e.touches);
+    pinchBaseZoom = currentZoom;
+  }
+}, { passive: true });
+
+scannerFrameEl.addEventListener("touchmove", (e) => {
+  if (scanning && e.touches.length === 2 && pinchBaseDist) {
+    e.preventDefault();
+    const dist = touchDistance(e.touches);
+    const ratio = dist / pinchBaseDist;
+    setZoom(pinchBaseZoom * ratio);
+  }
+}, { passive: false });
+
+scannerFrameEl.addEventListener("touchend", (e) => {
+  if (e.touches.length < 2) pinchBaseDist = null;
+});
+
 function stopScanning(){
   scanning = false;
   if (rafId) cancelAnimationFrame(rafId);
@@ -700,6 +891,11 @@ function stopScanning(){
   }
   torchTrack = null;
   torchOn = false;
+  zoomTrack = null;
+  zoomCaps = null;
+  currentZoom = 1;
+  pinchBaseDist = null;
+  video.style.transform = "";
   const torchBtn = $("#torchBtn");
   if (torchBtn) { torchBtn.hidden = true; torchBtn.classList.remove("is-on"); }
   video.classList.remove("is-live");
@@ -738,15 +934,36 @@ async function tick(){
     if (content) {
       stopScanning();
       const parsed = parseContent(content);
-      const result = analyze(parsed);
-      renderResult(parsed, result);
+      showAnalyzingState();
+      vibrate([15]);
+      const delay = 130 + Math.floor(Math.random() * 90); // ~130-220ms
+      setTimeout(() => {
+        const result = analyze(parsed);
+        renderResult(parsed, result);
+      }, delay);
       return;
     }
   }
   rafId = requestAnimationFrame(tick);
 }
 
+function showAnalyzingState(){
+  $("#verdictBanner").className = "verdict-banner analyzing";
+  $("#verdictIcon").innerHTML = ICONS.spinner;
+  $("#verdictTitle").textContent = "Analyzing…";
+  $("#verdictSubtitle").textContent = "Running local checks";
+  $("#verdictScore").textContent = "";
+  $("#verdictConfidence").textContent = "";
+  $("#contentValue").textContent = "";
+  $("#reasonsList").innerHTML = "";
+  $("#advisoryBlock").hidden = true;
+  $("#proceedBtn").hidden = true;
+  document.body.classList.remove("verdict-safe");
+  showView("result");
+}
+
 $("#startBtn").addEventListener("click", () => {
+  ensureAudioCtx();
   if (scanning) stopScanning();
   else startScanning();
 });
@@ -780,8 +997,12 @@ $("#fileInput").addEventListener("change", async (e) => {
 
     if (content) {
       const parsed = parseContent(content);
-      const result = analyze(parsed);
-      renderResult(parsed, result);
+      showAnalyzingState();
+      const delay = 130 + Math.floor(Math.random() * 90);
+      setTimeout(() => {
+        const result = analyze(parsed);
+        renderResult(parsed, result);
+      }, delay);
     } else {
       toast("No QR code found in that image.");
     }
@@ -798,5 +1019,67 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   });
 }
+
+/* ===========================================================
+   Install-app nudge
+   =========================================================== */
+function isStandaloneDisplay(){
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+const installNudge = $("#installNudge");
+const installNudgeInstallBtn = $("#installNudgeInstall");
+const installNudgeDismissBtn = $("#installNudgeDismiss");
+let deferredInstallPrompt = null;
+
+function hideInstallNudge(){ installNudge.hidden = true; }
+
+function showInstallNudge(mode){
+  if (isStandaloneDisplay() || getSetting("installDismissed", false)) return;
+  if (mode === "ios") {
+    $("#installNudgeTitle").textContent = "Install QRShield";
+    $("#installNudgeHelp").textContent = "Tap the Share icon, then \"Add to Home Screen\".";
+    installNudgeInstallBtn.hidden = true;
+  } else {
+    $("#installNudgeTitle").textContent = "Install QRShield";
+    $("#installNudgeHelp").textContent = "Add it to your home screen for quick, full-screen access.";
+    installNudgeInstallBtn.hidden = false;
+  }
+  installNudge.hidden = false;
+}
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  showInstallNudge("chromium");
+});
+
+window.addEventListener("appinstalled", () => {
+  hideInstallNudge();
+  deferredInstallPrompt = null;
+});
+
+installNudgeInstallBtn.addEventListener("click", async () => {
+  hideInstallNudge();
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  try { await deferredInstallPrompt.userChoice; } catch (e) { /* dismissed */ }
+  deferredInstallPrompt = null;
+});
+
+installNudgeDismissBtn.addEventListener("click", () => {
+  hideInstallNudge();
+  setSetting("installDismissed", true);
+});
+
+// iOS Safari never fires beforeinstallprompt — offer manual instructions instead.
+(function checkIosInstall(){
+  const ua = window.navigator.userAgent || "";
+  const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+  if (isIOS && isSafari && !isStandaloneDisplay()) {
+    setTimeout(() => showInstallNudge("ios"), 1500);
+  }
+})();
 
 })();

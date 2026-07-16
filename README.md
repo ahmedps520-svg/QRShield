@@ -6,9 +6,9 @@ no analytics, no server component — every check happens in the browser.
 
 ## Files
 
-- `index.html` — app shell (scan / result / settings screens)
+- `index.html` — app shell (scan / result / generate / settings screens)
 - `style.css` — black-and-red glossy theme + animations
-- `app.js` — camera capture, QR decoding, the safety-check engine, history, settings
+- `app.js` — camera capture, QR decoding, the safety-check engine, QR generation, history, settings
 - `manifest.json` — PWA metadata
 - `sw.js` — service worker for offline install (no push/notification code at all)
 - `icons/` — generated app icons (regular + maskable, multiple sizes)
@@ -47,9 +47,28 @@ the *text* of the code against a local rule set:
 
 Each check adds to a risk score; "Strict mode" (on by default, toggle in
 Settings) lowers the bar for flagging something as Caution or Dangerous.
+Each result also shows a confidence percentage — how far the evidence sits
+from a borderline call, not a certainty rating.
 
 This is a heuristic, not a verdict from a threat-intelligence database —
 treat "no red flags" as "nothing obvious," not a guarantee.
+
+## Generating QR codes
+
+The Generate tab lets you create your own QR code from any text or link,
+entirely on-device (via the QRious library, loaded from a CDN — nothing you
+type is sent anywhere). Codes are rendered in plain black-on-white for
+maximum real-world scan reliability, regardless of the app's own theme.
+Download as PNG or copy the image directly.
+
+## Other settings
+
+- **Strict mode** — tightens the risk thresholds (on by default)
+- **Scan vibration** / **Scan sound** — feedback on detection, each toggleable independently
+- **Appearance** — Auto (follows system), Light, or Dark
+- Pinch-to-zoom works on the camera view while scanning (uses real optical/digital
+  zoom on cameras that support it, falls back to a visual zoom otherwise)
+- A flashlight toggle appears automatically on devices/cameras that support it
 
 ## Scan history
 
