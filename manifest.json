@@ -2,7 +2,7 @@
   "name": "QRShield — Scan & Verify",
   "short_name": "QRShield",
   "description": "Scan any QR code and get an instant, on-device safety check before you ever open the link.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",

@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>QRShield — Scan &amp; Verify</title>
 <meta name="description" content="Scan any QR code and get an instant, on-device safety check before you ever open the link." />
 
 <link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#0a0a0a" />
+<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png" />
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
@@ -15,10 +16,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="QRShield" />
-
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
 <link rel="stylesheet" href="style.css" />
 </head>
@@ -72,6 +69,15 @@
           <p>Camera is off</p>
           <span>Point at a QR code — nothing is sent anywhere until you decide</span>
         </div>
+
+        <div class="scanner-blocked" id="scannerBlocked" hidden>
+          <div class="idle-icon blocked">
+            <svg viewBox="0 0 24 24" width="36" height="36"><path fill="currentColor" d="M12 1a9 9 0 100 18 9 9 0 000-18zm0 2c1.7 0 3.24.58 4.48 1.55L4.55 16.48A6.98 6.98 0 015 6.5 7 7 0 0112 3zm0 14a6.98 6.98 0 01-4.48-1.63L19.45 7.44A6.98 6.98 0 0119 12.5 7 7 0 0112 17z"/></svg>
+          </div>
+          <p id="scannerBlockedTitle">Camera permission denied</p>
+          <span id="scannerBlockedHelp">Enable camera access for this site in your browser settings, then try again.</span>
+          <button class="btn btn-outline" id="retryCameraBtn">Try again</button>
+        </div>
       </div>
 
       <div class="scanner-controls">
@@ -82,6 +88,9 @@
         <button class="btn btn-ghost" id="uploadBtn">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 20v-6h2v4h10v-4h2v6H5z"/></svg>
           Upload image
+        </button>
+        <button class="btn btn-icon" id="torchBtn" hidden aria-label="Toggle flashlight" title="Toggle flashlight">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M11 21h2v-6h-2v6zM7 3v8l3 3v1h4v-1l3-3V3H7zm2 2h6v5.17l-2 2V15h-2v-2.83l-2-2V5z"/></svg>
         </button>
         <input type="file" id="fileInput" accept="image/*" hidden />
       </div>
@@ -104,7 +113,10 @@
           <h2 id="verdictTitle">Analyzing…</h2>
           <p id="verdictSubtitle">Running local checks</p>
         </div>
-        <div class="verdict-score" id="verdictScore" title="Risk score"></div>
+        <div class="verdict-meta">
+          <div class="verdict-score" id="verdictScore" title="Risk score"></div>
+          <div class="verdict-confidence" id="verdictConfidence" title="Confidence in this verdict"></div>
+        </div>
       </div>
 
       <div class="content-block">
@@ -136,6 +148,15 @@
     <section class="settings-card">
 
       <div class="settings-group">
+        <h3>Appearance</h3>
+        <div class="theme-switcher" id="themeSwitcher">
+          <button class="theme-btn" data-theme-choice="auto">Auto</button>
+          <button class="theme-btn" data-theme-choice="dark">Dark</button>
+          <button class="theme-btn" data-theme-choice="light">Light</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
         <h3>Scanning</h3>
         <label class="switch-row">
           <div>
@@ -146,7 +167,7 @@
         </label>
         <label class="switch-row">
           <div>
-            <span class="switch-label">Haptic feedback</span>
+            <span class="switch-label">Scan vibration</span>
             <span class="switch-help">Vibrate briefly when a code is detected.</span>
           </div>
           <span class="switch"><input type="checkbox" id="hapticToggle" checked /><span class="slider"></span></span>
@@ -168,15 +189,16 @@
         <p class="about-text">
           Every scan is checked against on-device rules only: link structure, lookalike domains, link-shorteners that hide
           a destination, insecure connections, unusual characters, and QR types that carry sensitive data (Wi-Fi
-          passwords, contact cards, one-time-passcode secrets). Nothing is uploaded, and no destination link is ever
-          opened automatically. This is a heuristic check, not a guarantee — always be cautious with codes from
-          untrusted sources.
+          passwords, contact cards, one-time-passcode secrets). Each result also shows a confidence percentage —
+          how far the evidence sits from a borderline call, not a guarantee. Nothing is uploaded, and no destination
+          link is ever opened automatically. This is a heuristic check, not a database of known threats — always be
+          cautious with codes from untrusted sources.
         </p>
       </div>
 
       <div class="settings-group">
         <h3>About</h3>
-        <p class="about-text">QRShield · version 1.0 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
+        <p class="about-text">QRShield · version 2.13 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
       </div>
 
     </section>

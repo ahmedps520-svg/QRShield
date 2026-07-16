@@ -5,22 +5,27 @@
     first, so a new deploy shows up immediately instead of being masked by an
     old cached copy. The cache is only used as a fallback when there's no
     network at all.
+  - Only successful (res.ok) responses are cached — error pages (404/500)
+    are never saved, so a bad deploy can't get stuck in the offline cache.
+  - Falls back to a dedicated offline.html for full-page navigations when
+    both the network and the cache come up empty.
   - Deliberately does NOT register push, notification, or background-sync
     handlers — this app never needs to notify the user.
   - Never caches or intercepts requests to the destinations found inside
     scanned QR codes; it only manages this app's own static files.
 
-  NOTE: bump CACHE_NAME (e.g. v2 -> v3) whenever you want to force every
+  NOTE: bump CACHE_NAME (e.g. v3 -> v4) whenever you want to force every
   previously-installed copy of this app to drop its old offline cache.
 */
 
-const CACHE_NAME = "qrshield-shell-v2";
+const CACHE_NAME = "qrshield-shell-v3";
 const SHELL_FILES = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
   "./manifest.json",
+  "./offline.html",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/favicon-32.png",
@@ -47,24 +52,32 @@ self.addEventListener("activate", (event) => {
 });
 
 // Network-first for same-origin app-shell files: always try to fetch the
-// live version, update the cache with whatever comes back, and only serve
-// the cached copy if the network request fails outright (offline).
-// Cross-origin requests (e.g. the jsQR CDN library) are left alone entirely.
+// live version, cache it only if the response is actually OK, and fall
+// back to the cached copy (or a dedicated offline page for navigations)
+// only if the network request fails outright.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
   const isSameOrigin = url.origin === self.location.origin;
-  if (!isSameOrigin) return;
+  if (!isSameOrigin) return; // cross-origin (e.g. jsQR CDN) passes through untouched
 
   event.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        }
         return res;
       })
-      .catch(() => caches.match(req))
+      .catch(() =>
+        caches.match(req).then((cached) => {
+          if (cached) return cached;
+          if (req.mode === "navigate") return caches.match("./offline.html");
+          return undefined;
+        })
+      )
   );
 });

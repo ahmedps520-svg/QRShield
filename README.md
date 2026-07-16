@@ -1,6 +1,6 @@
 # QRShield
 
-A installable PWA that scans a QR code and runs an on-device safety check
+An installable PWA that scans a QR code and runs an on-device safety check
 before you ever open whatever it points to. No accounts, no notifications,
 no analytics, no server component — every check happens in the browser.
 

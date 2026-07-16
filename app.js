@@ -23,12 +23,15 @@ function vibrate(pattern){
 }
 
 function getSetting(key, fallback){
-  const v = localStorage.getItem("qrshield_" + key);
-  if (v === null) return fallback;
-  try { return JSON.parse(v); } catch(e){ return fallback; }
+  try {
+    const v = localStorage.getItem("qrshield_" + key);
+    if (v === null) return fallback;
+    return JSON.parse(v);
+  } catch(e){ return fallback; }
 }
 function setSetting(key, value){
-  localStorage.setItem("qrshield_" + key, JSON.stringify(value));
+  try { localStorage.setItem("qrshield_" + key, JSON.stringify(value)); }
+  catch(e){ /* storage unavailable (e.g. Safari Private Browsing) — setting just won't persist */ }
 }
 
 function escapeHtml(str){
@@ -55,12 +58,40 @@ $("#navScan").addEventListener("click", () => showView("scan"));
 $("#navSettings").addEventListener("click", () => showView("settings"));
 
 /* ===========================================================
+   Theme (auto / light / dark)
+   =========================================================== */
+function applyTheme(theme){
+  document.body.dataset.theme = theme;
+  $$(".theme-btn").forEach(b => b.classList.toggle("is-active", b.dataset.themeChoice === theme));
+}
+applyTheme(getSetting("theme", "auto"));
+
+$$(".theme-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const choice = btn.dataset.themeChoice;
+    setSetting("theme", choice);
+    applyTheme(choice);
+  });
+});
+
+/* ===========================================================
    Risk knowledge base
    =========================================================== */
 const SHORTENERS = new Set([
   "bit.ly","tinyurl.com","t.co","goo.gl","ow.ly","is.gd","buff.ly","cutt.ly",
   "rebrand.ly","tiny.cc","shorte.st","rb.gy","shorturl.at","soo.gd","s.id",
   "v.gd","lnkd.in","tr.im","clck.ru","qr.ae","bl.ink","po.st","adf.ly"
+]);
+
+// Services whose specific purpose is to capture a visitor's IP address and
+// approximate location and report it back to whoever created the link —
+// distinct from (and worse than) an ordinary link shortener that merely
+// hides a destination. Any match here is treated as an immediate danger.
+const IP_LOGGERS = new Set([
+  "iplogger.org","iplogger.com","iplogger.ru","iplogger.co","iplogger.info",
+  "grabify.link","2no.co","yip.su","iplis.ru","blasze.com","blasze.tk",
+  "whatstheirip.com","ezstat.ru","stopmodreposts.org","ipgrabber.ru",
+  "trackurl.link","spylink.net","copy-paste.link","shorturl.tips"
 ]);
 
 const SUSPICIOUS_TLDS = new Set([
@@ -132,6 +163,23 @@ function parseContent(raw){
    Safety analysis — everything below runs 100% locally.
    Nothing here ever fetches the destination.
    =========================================================== */
+function computeConfidence(score, verdict, thresholds, critical){
+  if (critical) return 99;
+  let conf;
+  if (verdict === "danger") {
+    const span = Math.max(1, 100 - thresholds.danger);
+    conf = 60 + Math.round(Math.min(1, (score - thresholds.danger) / span) * 39);
+  } else if (verdict === "caution") {
+    const span = Math.max(1, thresholds.danger - thresholds.caution);
+    const mid = thresholds.caution + span / 2;
+    const distFromMid = Math.abs(score - mid);
+    conf = 60 + Math.round((1 - Math.min(1, distFromMid / (span / 2))) * 25);
+  } else {
+    conf = 99 - Math.round(Math.min(1, score / thresholds.caution) * 35);
+  }
+  return Math.max(50, Math.min(99, conf));
+}
+
 function analyze(parsed){
   const strict = getSetting("strict", true);
   let score = 0;
@@ -230,6 +278,15 @@ function analyze(parsed){
       }
 
       const hostname = url.hostname.toLowerCase();
+      const root = hostnameRoot(hostname);
+
+      const isIpLogger = IP_LOGGERS.has(hostname) || IP_LOGGERS.has(root) ||
+        Array.from(IP_LOGGERS).some(d => hostname === d || hostname.endsWith("." + d));
+      if (isIpLogger) {
+        critical = true;
+        add("high", 80, "This domain is a known IP/location-logging service. Opening it can send your IP address and approximate location straight to whoever created this code — not just the destination site, a third party watching specifically for you.");
+        advisory = "Do not open this link. IP-logging services exist purely to identify and track whoever clicks, with no legitimate content on the other end.";
+      }
 
       if (url.protocol === "http:") {
         add("med", 18, "Uses unencrypted HTTP — any data exchanged with this site travels in plain text.");
@@ -266,7 +323,6 @@ function analyze(parsed){
         add("med", 20, `Uses the ".${tld}" domain ending, a low-cost extension frequently abused for throwaway or malicious sites.`);
       }
 
-      const root = hostnameRoot(hostname);
       if (SHORTENERS.has(hostname) || SHORTENERS.has(root)) {
         add("med", 26, "Uses a link-shortening service, so the real destination stays hidden until you actually open it.");
       }
@@ -277,13 +333,17 @@ function analyze(parsed){
       }
       if (!knownBrand) {
         const rootBase = root.split(".")[0] || "";
-        for (const brand of BRANDS) {
-          const brandBase = brand.split(".")[0];
-          if (Math.abs(rootBase.length - brandBase.length) > 2) continue;
-          const dist = levenshtein(rootBase, brandBase);
-          if (dist > 0 && dist <= 2 && rootBase.length >= 4) {
-            add("high", 48, `Domain closely resembles "${brand}" but is not the same site — a common phishing pattern.`);
-            break;
+        const tokens = Array.from(new Set([rootBase, ...rootBase.split(/[-_]/)])).filter(t => t.length >= 4);
+        outer:
+        for (const token of tokens) {
+          for (const brand of BRANDS) {
+            const brandBase = brand.split(".")[0];
+            if (Math.abs(token.length - brandBase.length) > 2) continue;
+            const dist = levenshtein(token, brandBase);
+            if (dist > 0 && dist <= 2) {
+              add("high", 48, `Domain closely resembles "${brand}" but is not the same site — a common phishing pattern.`);
+              break outer;
+            }
           }
         }
       }
@@ -328,7 +388,10 @@ function analyze(parsed){
   else if (score >= thresholds.caution) verdict = "caution";
   else verdict = "safe";
 
-  return { verdict, score: Math.min(score, 100), reasons, advisory, label, contentType: parsed.type };
+  const clampedScore = Math.min(score, 100);
+  const confidence = computeConfidence(clampedScore, verdict, thresholds, critical);
+
+  return { verdict, score: clampedScore, confidence, reasons, advisory, label, contentType: parsed.type };
 }
 
 /* ===========================================================
@@ -358,6 +421,7 @@ function renderResult(parsed, result){
   $("#verdictTitle").textContent = VERDICT_META[result.verdict].title;
   $("#verdictSubtitle").textContent = VERDICT_META[result.verdict].sub;
   $("#verdictScore").textContent = "risk " + result.score + "/100";
+  $("#verdictConfidence").textContent = result.confidence + "% confidence";
 
   $("#contentTypeLabel").textContent = result.label;
   $("#contentValue").textContent = parsed.raw;
@@ -441,10 +505,18 @@ $("#rescanBtn").addEventListener("click", () => showView("scan"));
    =========================================================== */
 const HISTORY_KEY = "qrshield_history_v1";
 const MAX_HISTORY = 50;
+const HISTORY_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+function loadHistory(){
+  try {
+    const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    const now = Date.now();
+    return Array.isArray(list) ? list.filter(h => h && (now - h.ts) < HISTORY_MAX_AGE_MS) : [];
+  } catch(e){ return []; }
+}
 
 function saveHistory(parsed, result){
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch(e){ history = []; }
+  let history = loadHistory();
   history.unshift({
     preview: truncate(parsed.raw, 90),
     type: result.label,
@@ -452,12 +524,12 @@ function saveHistory(parsed, result){
     ts: Date.now()
   });
   history = history.slice(0, MAX_HISTORY);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
+  catch(e){ /* storage unavailable — history just won't persist this session */ }
 }
 
 function renderHistory(){
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch(e){ history = []; }
+  const history = loadHistory();
   const ul = $("#historyList");
   const empty = $("#historyEmpty");
   ul.querySelectorAll(".history-item").forEach(n => n.remove());
@@ -486,7 +558,7 @@ function renderHistory(){
 
 $("#clearHistoryBtn").addEventListener("click", () => {
   if (!confirm("Clear all scan history on this device?")) return;
-  localStorage.removeItem(HISTORY_KEY);
+  try { localStorage.removeItem(HISTORY_KEY); } catch(e){ /* storage unavailable */ }
   renderHistory();
   toast("History cleared");
 });
@@ -541,6 +613,9 @@ async function initEngineStatus(){
 initEngineStatus();
 
 async function startScanning(){
+  $("#scannerBlocked").hidden = true;
+  $("#scannerIdle").classList.remove("hidden");
+
   if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     toast("Camera needs HTTPS or localhost — this page isn't loaded securely.", 4500);
     return;
@@ -552,11 +627,14 @@ async function startScanning(){
     });
   } catch (e) {
     if (e && e.name === "NotAllowedError") {
-      toast("Camera permission was denied — allow it in your browser's site settings.", 4500);
+      showCameraBlocked(
+        "Camera permission denied",
+        "Enable camera access for this site in your browser settings, then try again."
+      );
     } else if (e && e.name === "NotFoundError") {
-      toast("No camera was found on this device.", 4000);
+      showCameraBlocked("No camera found", "This device doesn't have a camera available to use.");
     } else {
-      toast("Camera couldn't start: " + (e && e.name ? e.name : "unknown error"), 4000);
+      showCameraBlocked("Camera couldn't start", (e && e.name) ? e.name : "An unknown error occurred.");
     }
     return;
   }
@@ -567,8 +645,51 @@ async function startScanning(){
   $("#scannerFrame").querySelector(".viewfinder").classList.add("is-active");
   $("#startBtn").textContent = "Stop scanning";
   scanning = true;
+  setupTorch();
   tick();
 }
+
+function showCameraBlocked(title, help){
+  $("#scannerIdle").classList.add("hidden");
+  $("#scannerBlockedTitle").textContent = title;
+  $("#scannerBlockedHelp").textContent = help;
+  $("#scannerBlocked").hidden = false;
+}
+
+$("#retryCameraBtn").addEventListener("click", () => startScanning());
+
+/* ---------- flashlight / torch ---------- */
+let torchTrack = null;
+let torchOn = false;
+
+function setupTorch(){
+  torchTrack = null;
+  torchOn = false;
+  const torchBtn = $("#torchBtn");
+  torchBtn.classList.remove("is-on");
+  torchBtn.hidden = true;
+
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track || typeof track.getCapabilities !== "function") return;
+  let caps;
+  try { caps = track.getCapabilities(); } catch(e){ return; }
+  if (caps && caps.torch) {
+    torchTrack = track;
+    torchBtn.hidden = false;
+  }
+}
+
+$("#torchBtn").addEventListener("click", async () => {
+  if (!torchTrack) return;
+  try {
+    torchOn = !torchOn;
+    await torchTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+    $("#torchBtn").classList.toggle("is-on", torchOn);
+  } catch (e) {
+    toast("Flashlight isn't available on this camera.");
+    torchOn = false;
+  }
+});
 
 function stopScanning(){
   scanning = false;
@@ -577,6 +698,10 @@ function stopScanning(){
     stream.getTracks().forEach(t => t.stop());
     stream = null;
   }
+  torchTrack = null;
+  torchOn = false;
+  const torchBtn = $("#torchBtn");
+  if (torchBtn) { torchBtn.hidden = true; torchBtn.classList.remove("is-on"); }
   video.classList.remove("is-live");
   const idle = $("#scannerIdle");
   if (idle) idle.classList.remove("hidden");
