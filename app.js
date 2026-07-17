@@ -427,6 +427,20 @@ let lastParsed = null;
 
 let lastHistoryEntryId = null;
 
+const SCORE_BAR_SEGMENTS = 10;
+function renderScoreBar(container, value, filledClass){
+  container.innerHTML = "";
+  const filledCount = Math.max(value > 0 ? 1 : 0, Math.round((value / 100) * SCORE_BAR_SEGMENTS));
+  for (let i = 0; i < SCORE_BAR_SEGMENTS; i++) {
+    const seg = document.createElement("span");
+    seg.className = "score-seg" + (i < filledCount ? " " + filledClass : "");
+    seg.style.setProperty("--seg-i", String(i));
+    container.appendChild(seg);
+  }
+  container.setAttribute("role", "img");
+  container.setAttribute("aria-label", String(value) + " out of 100");
+}
+
 function renderResult(parsed, result, options){
   options = options || {};
   lastAnalysis = result; lastParsed = parsed;
@@ -436,8 +450,10 @@ function renderResult(parsed, result, options){
   $("#verdictIcon").innerHTML = ICONS[VERDICT_META[result.verdict].icon];
   $("#verdictTitle").textContent = VERDICT_META[result.verdict].title;
   $("#verdictSubtitle").textContent = VERDICT_META[result.verdict].sub;
-  $("#verdictScore").textContent = "risk " + result.score + "/100";
-  $("#verdictConfidence").textContent = result.confidence + "% confidence";
+  renderScoreBar($("#riskBar"), result.score, "filled-risk");
+  renderScoreBar($("#confidenceBar"), result.confidence, "filled-confidence");
+  $("#analyzingBarWrap").hidden = true;
+  $("#scoreBars").hidden = false;
 
   $("#contentTypeLabel").textContent = result.label;
   $("#contentValue").textContent = parsed.raw;
@@ -1205,7 +1221,7 @@ async function tick(){
       const parsed = parseContent(content);
       showAnalyzingState();
       vibrate([15]);
-      const delay = 130 + Math.floor(Math.random() * 90); // ~130-220ms
+      const delay = 950; // matches the analyzing bar's CSS fill duration
       setTimeout(() => {
         const result = analyze(parsed);
         renderResult(parsed, result);
@@ -1221,13 +1237,21 @@ function showAnalyzingState(){
   $("#verdictIcon").innerHTML = ICONS.spinner;
   $("#verdictTitle").textContent = "Analyzing…";
   $("#verdictSubtitle").textContent = "Running local checks";
-  $("#verdictScore").textContent = "";
-  $("#verdictConfidence").textContent = "";
   $("#contentValue").textContent = "";
   $("#reasonsList").innerHTML = "";
   $("#advisoryBlock").hidden = true;
   $("#proceedBtn").hidden = true;
   document.body.classList.remove("verdict-safe");
+
+  const bar = $("#analyzingBar");
+  $("#scoreBars").hidden = true;
+  $("#analyzingBarWrap").hidden = false;
+  bar.style.transition = "none";
+  bar.style.width = "0%";
+  void bar.offsetWidth; // force reflow so the next width change actually transitions
+  bar.style.transition = "";
+  requestAnimationFrame(() => { bar.style.width = "100%"; });
+
   showView("result");
 }
 
@@ -1267,7 +1291,7 @@ $("#fileInput").addEventListener("change", async (e) => {
     if (content) {
       const parsed = parseContent(content);
       showAnalyzingState();
-      const delay = 130 + Math.floor(Math.random() * 90);
+      const delay = 950; // matches the analyzing bar's CSS fill duration
       setTimeout(() => {
         const result = analyze(parsed);
         renderResult(parsed, result);

@@ -388,17 +388,54 @@ button{ font-family: inherit; }
 .verdict-copy{ flex:1; min-width:0; }
 .verdict-copy h2{ margin:0 0 2px; font-family: var(--font-display); font-size:17px; }
 .verdict-copy p{ margin:0; font-size:12.5px; color: var(--text-mid); }
-.verdict-meta{ display:flex; flex-direction:column; gap:5px; flex:none; align-items:flex-end; }
-.verdict-score, .verdict-confidence{
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-mid);
+
+/* ---------- analyzing progress bar (red -> green sweep) ---------- */
+
+.analyzing-bar-wrap{
+  width:100%; height:9px; border-radius:100px; overflow:hidden;
+  background: rgba(255,255,255,0.06);
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  padding: 4px 7px;
-  white-space: nowrap;
+  margin: 16px 0;
 }
-.verdict-confidence{ color: var(--text-hi); font-weight:600; }
+.analyzing-bar{
+  height:100%; width:0%;
+  background: linear-gradient(90deg, #ff2d4d 0%, #ff8a3d 35%, #ffb020 60%, #2fe3a3 100%);
+  border-radius:100px;
+  transition: width 0.95s cubic-bezier(.4,0,.2,1);
+  box-shadow: 0 0 12px rgba(255,45,77,0.35);
+}
+.analyzing-bar-wrap[hidden]{ display:none; }
+
+/* ---------- risk / confidence bar meters ---------- */
+
+.score-bars{
+  display:flex; flex-direction:column; gap:11px;
+  margin: 14px 0 18px;
+  animation: reason-in .4s var(--ease-out) both;
+}
+.score-bar-row{ display:flex; align-items:center; gap:10px; }
+.score-bar-label{
+  flex:none; width:78px;
+  font-size: 11px; font-weight:700;
+  color: var(--text-lo);
+  text-transform: uppercase; letter-spacing:.06em;
+}
+.score-bar{ flex:1; display:flex; gap:3px; }
+.score-seg{
+  flex:1; height:10px; border-radius:3px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--hairline);
+  transition: background .35s ease, box-shadow .35s ease, border-color .35s ease;
+  transition-delay: calc(var(--seg-i, 0) * 35ms);
+}
+.score-seg.filled-risk{
+  background: var(--red-000); border-color: var(--red-000);
+  box-shadow: 0 0 7px rgba(255,45,77,0.45);
+}
+.score-seg.filled-confidence{
+  background: var(--amber); border-color: var(--amber);
+  box-shadow: 0 0 7px rgba(255,176,32,0.4);
+}
 
 .verdict-banner.safe{ background: linear-gradient(135deg, rgba(47,227,163,0.12), rgba(47,227,163,0.02)); border-color: rgba(47,227,163,0.25); }
 .verdict-banner.safe .verdict-icon{ background: rgba(47,227,163,0.16); color: var(--green); }

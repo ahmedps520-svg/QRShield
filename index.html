@@ -118,9 +118,20 @@
           <h2 id="verdictTitle">Analyzing…</h2>
           <p id="verdictSubtitle">Running local checks</p>
         </div>
-        <div class="verdict-meta">
-          <div class="verdict-score" id="verdictScore" title="Risk score"></div>
-          <div class="verdict-confidence" id="verdictConfidence" title="Confidence in this verdict"></div>
+      </div>
+
+      <div class="analyzing-bar-wrap" id="analyzingBarWrap">
+        <div class="analyzing-bar" id="analyzingBar"></div>
+      </div>
+
+      <div class="score-bars" id="scoreBars" hidden>
+        <div class="score-bar-row">
+          <span class="score-bar-label">Risk</span>
+          <div class="score-bar" id="riskBar"></div>
+        </div>
+        <div class="score-bar-row">
+          <span class="score-bar-label">Confidence</span>
+          <div class="score-bar" id="confidenceBar"></div>
         </div>
       </div>
 
@@ -283,7 +294,7 @@
 
       <div class="settings-group">
         <h3>About</h3>
-        <p class="about-text">QRShield · version 6.34 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
+        <p class="about-text">QRShield · version 7.35 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
       </div>
 
     </section>
