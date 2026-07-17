@@ -39,8 +39,13 @@
       </span>
       <span class="brand-name">QR<em>Shield</em></span>
     </div>
-    <div class="status-chip" id="engineStatus">
-      <span class="dot"></span> <span id="engineStatusText">On-device engine ready</span>
+    <div class="topbar-status">
+      <div class="status-chip offline-badge" id="offlineBadge" hidden>
+        <span class="dot"></span> <span>Offline mode</span>
+      </div>
+      <div class="status-chip" id="engineStatus">
+        <span class="dot"></span> <span id="engineStatusText">On-device engine ready</span>
+      </div>
     </div>
   </header>
 
@@ -135,6 +140,9 @@
       </div>
 
       <div class="result-actions">
+        <button class="btn btn-icon" id="favoriteBtn" aria-label="Favorite this scan" title="Favorite this scan">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 17.3 6.2 21l1.6-6.7L2 9.7l6.9-.6L12 2.5l3.1 6.6 6.9.6-5.8 4.6L17.8 21z"/></svg>
+        </button>
         <button class="btn btn-ghost" id="copyBtn">Copy content</button>
         <button class="btn btn-outline" id="rescanBtn">Scan another</button>
         <button class="btn btn-primary" id="proceedBtn">Open anyway</button>
@@ -171,6 +179,54 @@
         <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 2l7 3v6c0 5-3.4 8.7-7 11-3.6-2.3-7-6-7-11V5l7-3z"/></svg>
         Generated entirely on this device — nothing you type here is sent anywhere. Codes are rendered in plain black-on-white for the most reliable real-world scanning.
       </p>
+
+    </section>
+  </main>
+
+  <!-- ===================== HISTORY VIEW ===================== -->
+  <main class="view" id="view-history" data-view hidden>
+    <section class="settings-card">
+
+      <div class="settings-group">
+        <div class="group-header-row">
+          <h3>Scan statistics</h3>
+        </div>
+        <div class="history-stats" id="historyStats">
+          <div class="stat-chip"><strong id="statTotal">0</strong><span>Total</span></div>
+          <div class="stat-chip safe"><strong id="statSafe">0</strong><span>Safe</span></div>
+          <div class="stat-chip caution"><strong id="statCaution">0</strong><span>Caution</span></div>
+          <div class="stat-chip danger"><strong id="statDanger">0</strong><span>Dangerous</span></div>
+        </div>
+        <div class="activity-calendar-wrap">
+          <span class="content-label">Activity, last 10 weeks</span>
+          <div class="activity-calendar" id="activityCalendar"></div>
+        </div>
+        <div class="top-domains-wrap" id="topDomainsWrap" hidden>
+          <span class="content-label">Most-scanned domains</span>
+          <div class="top-domains" id="topDomains"></div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="group-header-row">
+          <h3>Scan history</h3>
+          <button class="btn btn-tiny" id="clearHistoryBtn">Clear all</button>
+        </div>
+
+        <div class="history-toolbar">
+          <input type="text" id="historySearch" class="history-search" placeholder="Search history…" />
+          <button class="btn-tiny btn-tiny-muted" id="favoriteFilterBtn" aria-pressed="false">★ Favorites</button>
+        </div>
+
+        <ul class="history-list" id="historyList">
+          <li class="history-empty" id="historyEmpty">No scans yet — your history stays on this device only.</li>
+        </ul>
+
+        <div class="history-export-row">
+          <button class="btn btn-ghost" id="exportCsvBtn">Export CSV</button>
+          <button class="btn btn-ghost" id="exportPdfBtn">Export / Print</button>
+        </div>
+      </div>
 
     </section>
   </main>
@@ -214,16 +270,6 @@
       </div>
 
       <div class="settings-group">
-        <div class="group-header-row">
-          <h3>Scan history</h3>
-          <button class="btn btn-tiny" id="clearHistoryBtn">Clear all</button>
-        </div>
-        <ul class="history-list" id="historyList">
-          <li class="history-empty" id="historyEmpty">No scans yet — your history stays on this device only.</li>
-        </ul>
-      </div>
-
-      <div class="settings-group">
         <h3>How QRShield decides</h3>
         <p class="about-text">
           Every scan is checked against on-device rules only: link structure, lookalike domains, link-shorteners that hide
@@ -237,7 +283,7 @@
 
       <div class="settings-group">
         <h3>About</h3>
-        <p class="about-text">QRShield · version 2.14 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
+        <p class="about-text">QRShield · version 6.34 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
       </div>
 
     </section>
@@ -252,6 +298,10 @@
     <button class="nav-btn" id="navGenerate" data-nav="generate">
       <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M11 5h2v2h-2V5zm0 12h2v2h-2v-2zm-6-8h6v6H5V9zm2 2v2h2v-2H7zm10-2h2v2h-2V9zm-4 4h2v2h-2v-2zm0-4h2v2h-2V9zm4 4h2v6h-6v-2h4v-4zM5 3h6v6H5V3zm2 2v2h2V5H7zm10-2h6v6h-6V3zm2 2v2h2V5h-2z"/></svg>
       <span>Generate</span>
+    </button>
+    <button class="nav-btn" id="navHistory" data-nav="history">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M13 3a9 9 0 00-9 9H1l3.9 4 4.1-4H6a7 7 0 117 7 6.9 6.9 0 01-4.9-2l-1.4 1.4A9 9 0 1013 3zm-1 5v5l4.2 2.5.8-1.3-3.5-2.1V8h-1.5z"/></svg>
+      <span>History</span>
     </button>
     <button class="nav-btn" id="navSettings" data-nav="settings">
       <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 000-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 00-1.7-1L14.9 3h-3.8l-.4 2.4a7.6 7.6 0 00-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 000 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 001.7 1l.4 2.4h3.8l.4-2.4a7.6 7.6 0 001.7-1l2.4 1 2-3.4-2-1.6zM13 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>

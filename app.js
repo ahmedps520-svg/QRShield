@@ -50,12 +50,13 @@ function truncate(str, n){
 function showView(name){
   $$("[data-view]").forEach(v => v.hidden = (v.id !== "view-" + name));
   $$(".nav-btn").forEach(b => b.classList.toggle("is-active", b.dataset.nav === name));
-  if (name === "settings") renderHistory();
+  if (name === "history") renderHistory();
   if (name !== "scan") stopScanning();
 }
 
 $("#navScan").addEventListener("click", () => showView("scan"));
 $("#navGenerate").addEventListener("click", () => showView("generate"));
+$("#navHistory").addEventListener("click", () => showView("history"));
 $("#navSettings").addEventListener("click", () => showView("settings"));
 
 /* ===========================================================
@@ -66,6 +67,16 @@ function applyTheme(theme){
   $$(".theme-btn").forEach(b => b.classList.toggle("is-active", b.dataset.themeChoice === theme));
 }
 applyTheme(getSetting("theme", "auto"));
+
+/* ===========================================================
+   Offline badge
+   =========================================================== */
+function updateOnlineStatus(){
+  $("#offlineBadge").hidden = navigator.onLine;
+}
+window.addEventListener("online", updateOnlineStatus);
+window.addEventListener("offline", updateOnlineStatus);
+updateOnlineStatus();
 
 $$(".theme-btn").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -414,7 +425,10 @@ const ICONS = {
 let lastAnalysis = null;
 let lastParsed = null;
 
-function renderResult(parsed, result){
+let lastHistoryEntryId = null;
+
+function renderResult(parsed, result, options){
+  options = options || {};
   lastAnalysis = result; lastParsed = parsed;
 
   const banner = $("#verdictBanner");
@@ -457,12 +471,49 @@ function renderResult(parsed, result){
 
   document.body.classList.toggle("verdict-safe", result.verdict === "safe");
   showView("result");
-  saveHistory(parsed, result);
+
+  if (options.fromHistory) {
+    lastHistoryEntryId = options.historyId;
+  } else {
+    lastHistoryEntryId = saveHistory(parsed, result);
+    if (result.verdict === "safe") fireConfetti();
+  }
+  const favEntry = loadHistory().find(h => h.id === lastHistoryEntryId);
+  $("#favoriteBtn").classList.toggle("is-on", !!(favEntry && favEntry.fav));
 
   if (result.verdict === "danger") vibrate([60, 40, 60, 40, 120]);
   else if (result.verdict === "caution") vibrate([50]);
   else vibrate([20]);
   playScanSound(result.verdict);
+}
+
+$("#favoriteBtn").addEventListener("click", () => {
+  if (!lastHistoryEntryId) return;
+  const history = loadHistory();
+  const entry = history.find(h => h.id === lastHistoryEntryId);
+  if (!entry) return;
+  entry.fav = !entry.fav;
+  persistHistory(history);
+  $("#favoriteBtn").classList.toggle("is-on", entry.fav);
+});
+
+/* ---------- confetti (verified-safe celebration) ---------- */
+function fireConfetti(){
+  const colors = ["#ff2d4d","#ff5470","#2fe3a3","#ffb020","#ffffff"];
+  const count = 36;
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement("div");
+    el.className = "confetti-piece";
+    const size = 6 + Math.random() * 6;
+    el.style.width = size + "px";
+    el.style.height = (size * 0.4) + "px";
+    el.style.left = Math.random() * 100 + "vw";
+    el.style.background = colors[Math.floor(Math.random() * colors.length)];
+    el.style.animationDuration = (2.1 + Math.random() * 1.3) + "s";
+    el.style.animationDelay = (Math.random() * 0.25) + "s";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+  }
 }
 
 $("#proceedBtn").addEventListener("click", () => {
@@ -518,27 +569,65 @@ function loadHistory(){
   } catch(e){ return []; }
 }
 
-function saveHistory(parsed, result){
-  let history = loadHistory();
-  history.unshift({
-    preview: truncate(parsed.raw, 90),
-    type: result.label,
-    verdict: result.verdict,
-    ts: Date.now()
-  });
-  history = history.slice(0, MAX_HISTORY);
+function persistHistory(history){
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
   catch(e){ /* storage unavailable — history just won't persist this session */ }
 }
 
+function extractDomain(raw){
+  try {
+    const t = raw.trim();
+    if (/^https?:\/\//i.test(t)) return new URL(t).hostname.toLowerCase();
+    if (/^[a-z0-9.-]+\.[a-z]{2,}(\/|$|\?)/i.test(t) && !/\s/.test(t)) return new URL("https://" + t).hostname.toLowerCase();
+  } catch(e){ /* not a URL-shaped value */ }
+  return null;
+}
+
+function saveHistory(parsed, result){
+  let history = loadHistory();
+  const id = Date.now() + "-" + Math.random().toString(36).slice(2, 7);
+  history.unshift({
+    id,
+    raw: parsed.raw,
+    preview: truncate(parsed.raw, 90),
+    type: result.label,
+    verdict: result.verdict,
+    domain: extractDomain(parsed.raw),
+    fav: false,
+    tags: [],
+    ts: Date.now()
+  });
+  history = history.slice(0, MAX_HISTORY);
+  persistHistory(history);
+  return id;
+}
+
+let historySearchTerm = "";
+let showFavoritesOnly = false;
+
 function renderHistory(){
-  const history = loadHistory();
+  const allHistory = loadHistory();
+  renderStats(allHistory);
+
+  let history = allHistory;
+  if (showFavoritesOnly) history = history.filter(h => h.fav);
+  if (historySearchTerm) {
+    const q = historySearchTerm.toLowerCase();
+    history = history.filter(h =>
+      (h.raw || "").toLowerCase().includes(q) ||
+      (h.tags || []).some(t => t.toLowerCase().includes(q))
+    );
+  }
+
   const ul = $("#historyList");
   const empty = $("#historyEmpty");
   ul.querySelectorAll(".history-item").forEach(n => n.remove());
 
   if (!history.length) {
     empty.hidden = false;
+    empty.textContent = allHistory.length
+      ? "No scans match your filters."
+      : "No scans yet — your history stays on this device only.";
     return;
   }
   empty.hidden = true;
@@ -546,18 +635,198 @@ function renderHistory(){
   history.forEach(item => {
     const li = document.createElement("li");
     li.className = "history-item " + item.verdict;
+    li.dataset.id = item.id;
     const date = new Date(item.ts);
     const when = date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
                  " · " + date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const tagsHtml = (item.tags && item.tags.length)
+      ? `<div class="h-tags">${item.tags.map(t => `<span class="history-tag">${escapeHtml(t)}</span>`).join("")}</div>`
+      : "";
     li.innerHTML = `
       <span class="h-dot"></span>
-      <div class="h-body">
+      <div class="h-body" data-action="review">
         <div class="h-url">${escapeHtml(item.preview)}</div>
-        <div class="h-time">${item.type} · ${when}</div>
-      </div>`;
+        <div class="h-time">${item.type} · ${when} · <button class="h-tag-edit" data-action="tags" type="button">+ tag</button></div>
+        ${tagsHtml}
+      </div>
+      <button class="h-fav ${item.fav ? "is-fav" : ""}" data-action="fav" type="button" aria-label="Favorite">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 17.3 6.2 21l1.6-6.7L2 9.7l6.9-.6L12 2.5l3.1 6.6 6.9.6-5.8 4.6L17.8 21z"/></svg>
+      </button>`;
     ul.appendChild(li);
   });
 }
+
+$("#historyList").addEventListener("click", (e) => {
+  const li = e.target.closest(".history-item");
+  if (!li) return;
+  const id = li.dataset.id;
+  const history = loadHistory();
+  const entry = history.find(h => h.id === id);
+  if (!entry) return;
+
+  if (e.target.closest('[data-action="fav"]')) {
+    entry.fav = !entry.fav;
+    persistHistory(history);
+    renderHistory();
+    return;
+  }
+
+  if (e.target.closest('[data-action="tags"]')) {
+    const current = (entry.tags || []).join(", ");
+    const input = prompt("Tags (comma-separated):", current);
+    if (input !== null) {
+      entry.tags = input.split(",").map(t => t.trim()).filter(Boolean).slice(0, 6);
+      persistHistory(history);
+      renderHistory();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="review"]')) {
+    const parsed = parseContent(entry.raw);
+    const result = analyze(parsed);
+    renderResult(parsed, result, { fromHistory: true, historyId: entry.id });
+  }
+});
+
+$("#historySearch").addEventListener("input", (e) => {
+  historySearchTerm = e.target.value;
+  renderHistory();
+});
+
+$("#favoriteFilterBtn").addEventListener("click", () => {
+  showFavoritesOnly = !showFavoritesOnly;
+  const btn = $("#favoriteFilterBtn");
+  btn.classList.toggle("is-active", showFavoritesOnly);
+  btn.setAttribute("aria-pressed", String(showFavoritesOnly));
+  renderHistory();
+});
+
+/* ---------- stats / activity calendar ---------- */
+
+function renderStats(history){
+  const counts = { safe: 0, caution: 0, danger: 0 };
+  const domainCounts = {};
+  history.forEach(h => {
+    if (counts[h.verdict] !== undefined) counts[h.verdict]++;
+    if (h.domain) domainCounts[h.domain] = (domainCounts[h.domain] || 0) + 1;
+  });
+  $("#statTotal").textContent = history.length;
+  $("#statSafe").textContent = counts.safe;
+  $("#statCaution").textContent = counts.caution;
+  $("#statDanger").textContent = counts.danger;
+
+  const wrap = $("#topDomainsWrap");
+  const list = $("#topDomains");
+  list.innerHTML = "";
+  const topDomains = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (topDomains.length) {
+    wrap.hidden = false;
+    topDomains.forEach(([domain, count]) => {
+      const row = document.createElement("div");
+      row.className = "top-domain-row";
+      row.innerHTML = `<span>${escapeHtml(domain)}</span><span class="count">${count}</span>`;
+      list.appendChild(row);
+    });
+  } else {
+    wrap.hidden = true;
+  }
+
+  renderActivityCalendar(history);
+}
+
+function renderActivityCalendar(history){
+  const days = 70; // ~10 weeks
+  const dayCounts = {};
+  history.forEach(h => {
+    const key = new Date(h.ts).toISOString().slice(0, 10);
+    dayCounts[key] = (dayCounts[key] || 0) + 1;
+  });
+
+  const cal = $("#activityCalendar");
+  cal.innerHTML = "";
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const count = dayCounts[key] || 0;
+    let level = 0;
+    if (count >= 1) level = 1;
+    if (count >= 3) level = 2;
+    if (count >= 6) level = 3;
+    if (count >= 10) level = 4;
+    const cell = document.createElement("div");
+    cell.className = "activity-cell";
+    cell.dataset.level = String(level);
+    cell.title = `${key}: ${count} scan${count === 1 ? "" : "s"}`;
+    cal.appendChild(cell);
+  }
+}
+
+/* ---------- export ---------- */
+
+function csvEscape(val){
+  const s = String(val == null ? "" : val);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+$("#exportCsvBtn").addEventListener("click", () => {
+  const history = loadHistory();
+  if (!history.length) { toast("No history to export."); return; }
+  const rows = [["Date", "Verdict", "Type", "Content", "Tags", "Favorite"]];
+  history.forEach(h => {
+    rows.push([
+      new Date(h.ts).toISOString(),
+      h.verdict,
+      h.type,
+      h.raw,
+      (h.tags || []).join("; "),
+      h.fav ? "Yes" : "No"
+    ]);
+  });
+  const csv = rows.map(r => r.map(csvEscape).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "qrshield-history.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+  toast("CSV downloaded");
+});
+
+$("#exportPdfBtn").addEventListener("click", () => {
+  const history = loadHistory();
+  if (!history.length) { toast("No history to export."); return; }
+  const rowsHtml = history.map(h => `
+    <tr>
+      <td>${escapeHtml(new Date(h.ts).toLocaleString())}</td>
+      <td>${escapeHtml(h.verdict)}</td>
+      <td>${escapeHtml(h.type)}</td>
+      <td style="word-break:break-all;">${escapeHtml(h.raw)}</td>
+      <td>${escapeHtml((h.tags || []).join(", "))}</td>
+    </tr>`).join("");
+  const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>QRShield Scan History</title>
+    <style>
+      body{ font-family: -apple-system, Arial, sans-serif; padding:24px; color:#111; }
+      h1{ font-size:18px; margin-bottom:4px; }
+      p{ color:#555; font-size:12px; margin-top:0; }
+      table{ width:100%; border-collapse:collapse; font-size:11px; }
+      th,td{ border:1px solid #ddd; padding:6px 8px; text-align:left; vertical-align:top; }
+      th{ background:#f4f4f4; }
+    </style></head><body>
+    <h1>QRShield Scan History</h1>
+    <p>Exported ${escapeHtml(new Date().toLocaleString())} · ${history.length} scans</p>
+    <table><thead><tr><th>Date</th><th>Verdict</th><th>Type</th><th>Content</th><th>Tags</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table>
+    </body></html>`;
+  const win = window.open("", "_blank");
+  if (!win) { toast("Pop-up blocked — allow pop-ups to export."); return; }
+  win.document.write(doc);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { try { win.print(); } catch(e){} }, 300);
+});
 
 $("#clearHistoryBtn").addEventListener("click", () => {
   if (!confirm("Clear all scan history on this device?")) return;

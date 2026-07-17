@@ -153,27 +153,37 @@ button{ font-family: inherit; }
 
 /* ---------- generic glass card ---------- */
 
-.scanner-card, .result-card, .settings-card{
-  background: linear-gradient(155deg, rgba(255,255,255,0.045), rgba(255,255,255,0.01) 40%, rgba(255,255,255,0.02));
+.scanner-card, .result-card, .settings-card, .generate-card{
+  background: linear-gradient(155deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015) 40%, rgba(255,255,255,0.03));
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
   padding: 18px;
   position: relative;
   overflow: hidden;
   box-shadow:
-    0 1px 0 rgba(255,255,255,0.05) inset,
+    0 1px 0 rgba(255,255,255,0.06) inset,
     0 30px 60px -30px rgba(0,0,0,0.8),
     0 0 0 1px rgba(0,0,0,0.4);
   animation: rise-in .5s var(--ease-out) both;
 }
-/* glossy sheen sweep across the top of the card */
-.scanner-card::before, .result-card::before, .settings-card::before{
+/* glossy sheen sweep across the top of the card, plus a faint diagonal
+   reflection streak for a more pronounced glass feel */
+.scanner-card::before, .result-card::before, .settings-card::before, .generate-card::before{
   content:"";
   position:absolute; inset:-2px -2px auto -2px;
   height: 90px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0) 100%);
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0) 100%);
   pointer-events:none;
   border-radius: var(--radius-lg) var(--radius-lg) 50% 50% / var(--radius-lg) var(--radius-lg) 100% 100%;
+}
+.scanner-card::after, .result-card::after, .settings-card::after, .generate-card::after{
+  content:"";
+  position:absolute; top:-40%; left:-20%; width:60%; height:180%;
+  background: linear-gradient(100deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 60%);
+  transform: rotate(8deg);
+  pointer-events:none;
 }
 
 @keyframes rise-in{
@@ -707,6 +717,129 @@ body.verdict-safe .result-actions #proceedBtn{ background: linear-gradient(135de
   color: var(--text-mid);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--hairline);
+}
+
+/* ---------- history stats ---------- */
+
+.history-stats{
+  display:flex; gap:8px; margin-bottom:16px;
+}
+.stat-chip{
+  flex:1; text-align:center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  padding: 10px 4px;
+  display:flex; flex-direction:column; gap:2px;
+}
+.stat-chip strong{ font-family: var(--font-display); font-size:18px; font-weight:700; }
+.stat-chip span{ font-size:10.5px; color: var(--text-lo); text-transform:uppercase; letter-spacing:.05em; }
+.stat-chip.safe strong{ color: var(--green); }
+.stat-chip.caution strong{ color: var(--amber); }
+.stat-chip.danger strong{ color: var(--red-000); }
+
+.activity-calendar-wrap{ margin-bottom:16px; }
+.activity-calendar{
+  display:grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  gap: 3px;
+  margin-top:8px;
+  overflow-x:auto;
+  padding-bottom: 2px;
+}
+.activity-cell{
+  width:11px; height:11px; border-radius:3px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--hairline);
+}
+.activity-cell[data-level="1"]{ background: rgba(255,45,77,0.25); border-color: rgba(255,45,77,0.3); }
+.activity-cell[data-level="2"]{ background: rgba(255,45,77,0.5); border-color: rgba(255,45,77,0.5); }
+.activity-cell[data-level="3"]{ background: rgba(255,45,77,0.8); border-color: rgba(255,45,77,0.8); }
+.activity-cell[data-level="4"]{ background: var(--red-000); border-color: var(--red-000); }
+
+.top-domains-wrap{ margin-top:16px; }
+.top-domains{ display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.top-domain-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  font-size:12.5px; font-family: var(--font-mono);
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.top-domain-row .count{
+  flex:none; color: var(--text-lo); font-size:11px;
+  background: rgba(255,255,255,0.06); border-radius:6px; padding:1px 6px;
+}
+
+/* ---------- history toolbar / export ---------- */
+
+.history-toolbar{ display:flex; gap:8px; margin-bottom:12px; }
+.history-search{
+  flex:1; font-family: var(--font-body); font-size:13.5px; color: var(--text-hi);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--hairline);
+  border-radius: 100px;
+  padding: 9px 14px;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.history-search:focus{
+  outline:none; border-color: rgba(255,45,77,0.4);
+  box-shadow: 0 0 0 3px rgba(255,45,77,0.12);
+}
+.favorite-filter-btn.is-active{
+  color:#fff;
+  background: linear-gradient(135deg, var(--red-000), var(--red-200));
+  border-color: transparent;
+}
+
+.history-export-row{ display:flex; gap:10px; margin-top:14px; }
+
+.history-item{ position:relative; }
+.history-item .h-fav{
+  flex:none; background:transparent; border:none; cursor:pointer;
+  color: var(--text-lo); padding:2px; display:flex; align-items:center;
+  transition: color .2s ease, transform .15s var(--ease-out);
+}
+.history-item .h-fav.is-fav{ color: var(--amber); }
+.history-item .h-fav:active{ transform: scale(1.2); }
+.history-item .h-tags{ display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; }
+.history-tag{
+  font-size:10px; padding:2px 7px; border-radius:100px;
+  background: rgba(255,45,77,0.1); color: var(--red-000);
+  border: 1px solid rgba(255,45,77,0.2);
+}
+
+/* ---------- offline badge ---------- */
+
+.topbar-status{ display:flex; align-items:center; gap:8px; }
+.offline-badge{ color: var(--amber); border-color: rgba(255,176,32,0.3); background: rgba(255,176,32,0.08); }
+.offline-badge .dot{ background: var(--amber); box-shadow: 0 0 8px rgba(255,176,32,0.5); animation: pulse-dot 2.2s ease-in-out infinite; }
+
+/* ---------- favorite button on result screen ---------- */
+
+#favoriteBtn.is-on{
+  color: var(--amber);
+  background: rgba(255,176,32,0.12);
+  border-color: rgba(255,176,32,0.3);
+}
+#favoriteBtn.is-on svg{ animation: fav-pop .35s var(--ease-out); }
+@keyframes fav-pop{
+  0%{ transform: scale(1); }
+  40%{ transform: scale(1.35); }
+  100%{ transform: scale(1); }
+}
+
+/* ---------- confetti (verified-safe celebration) ---------- */
+
+.confetti-piece{
+  position: fixed; top:-10px; z-index: 60; pointer-events:none;
+  border-radius:2px;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall{
+  to{ transform: translateY(110vh) rotate(540deg); opacity: 0.4; }
 }
 
 /* ---------- misc ---------- */
