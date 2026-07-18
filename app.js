@@ -51,12 +51,14 @@ function showView(name){
   $$("[data-view]").forEach(v => v.hidden = (v.id !== "view-" + name));
   $$(".nav-btn").forEach(b => b.classList.toggle("is-active", b.dataset.nav === name));
   if (name === "history") renderHistory();
+  if (name === "blocked") renderBlockedList();
   if (name !== "scan") stopScanning();
 }
 
 $("#navScan").addEventListener("click", () => showView("scan"));
 $("#navGenerate").addEventListener("click", () => showView("generate"));
 $("#navHistory").addEventListener("click", () => showView("history"));
+$("#navBlocked").addEventListener("click", () => showView("blocked"));
 $("#navSettings").addEventListener("click", () => showView("settings"));
 
 /* ===========================================================
@@ -92,7 +94,9 @@ $$(".theme-btn").forEach(btn => {
 const SHORTENERS = new Set([
   "bit.ly","tinyurl.com","t.co","goo.gl","ow.ly","is.gd","buff.ly","cutt.ly",
   "rebrand.ly","tiny.cc","shorte.st","rb.gy","shorturl.at","soo.gd","s.id",
-  "v.gd","lnkd.in","tr.im","clck.ru","qr.ae","bl.ink","po.st","adf.ly"
+  "v.gd","lnkd.in","tr.im","clck.ru","qr.ae","bl.ink","po.st","adf.ly",
+  "cli.re","short.io","tiny.one","urlgeni.us","chilp.it","x.co","1url.com",
+  "vzturl.com","zi.ma","kutt.it","git.io","cutt.us","gg.gg"
 ]);
 
 // Services whose specific purpose is to capture a visitor's IP address and
@@ -103,13 +107,17 @@ const IP_LOGGERS = new Set([
   "iplogger.org","iplogger.com","iplogger.ru","iplogger.co","iplogger.info",
   "grabify.link","2no.co","yip.su","iplis.ru","blasze.com","blasze.tk",
   "whatstheirip.com","ezstat.ru","stopmodreposts.org","ipgrabber.ru",
-  "trackurl.link","spylink.net","copy-paste.link","shorturl.tips"
+  "trackurl.link","spylink.net","copy-paste.link","shorturl.tips",
+  "grabify.io","yourip.pro","catchip.net","ip-grabber.com","logger.ru",
+  "definitely-not-a-virus.com","freegiftcard-mobile.com","ipogger.com"
 ]);
 
 const SUSPICIOUS_TLDS = new Set([
   "tk","ml","ga","cf","gq","xyz","top","work","click","link","loan","win",
   "review","country","kim","gdn","men","party","science","date","faith",
-  "icu","cam","cyou","buzz","rest","sbs","quest","monster"
+  "icu","cam","cyou","buzz","rest","sbs","quest","monster","support",
+  "fit","zip","mom","lol","biz","surf","cfd","bond","beauty","skin",
+  "wang","live","stream","download","racing","accountant"
 ]);
 
 const BRANDS = [
@@ -118,17 +126,68 @@ const BRANDS = [
   "wellsfargo.com","dropbox.com","whatsapp.com","linkedin.com","twitter.com",
   "x.com","coinbase.com","binance.com","outlook.com","icloud.com","office.com",
   "adobe.com","ebay.com","americanexpress.com","usbank.com","citibank.com",
-  "yahoo.com","steamcommunity.com","docusign.com"
+  "yahoo.com","steamcommunity.com","docusign.com","microsoft365.com",
+  "live.com","hotmail.com","github.com","gitlab.com","spotify.com",
+  "venmo.com","zelle.com","cashapp.com","robinhood.com","kraken.com",
+  "metamask.io","tiktok.com","snapchat.com","discord.com","telegram.org",
+  "usps.com","fedex.com","ups.com","dhl.com","irs.gov"
 ];
 
 const SENSITIVE_KEYWORDS = [
   "login","verify","secure","account","update","confirm","password","wallet",
-  "support","signin","billing","suspended","unlock","recover","security-alert"
+  "support","signin","billing","suspended","unlock","recover","security-alert",
+  "authenticate","validate","reactivate","restricted","limited","invoice",
+  "refund","delivery","tracking-id","gift","prize","winner","claim"
 ];
+
+// Dangerous executable/script file extensions — a QR code pointing straight
+// at one of these is trying to get a file installed/run, not viewed.
+const DANGEROUS_EXTENSIONS = new Set([
+  "exe","apk","msi","scr","bat","cmd","jar","ps1","vbs","com","gadget",
+  "wsf","reg","dmg","pkg","run","sh"
+]);
+
+// Query parameters commonly used to bounce a visitor through to a second,
+// hidden URL — the display domain isn't necessarily where you'd land.
+const REDIRECT_PARAMS = ["url","redirect","redirect_uri","next","return","continue","goto","dest","destination","target"];
 
 const TWO_LEVEL_TLDS = new Set([
   "co.uk","com.au","co.jp","co.in","com.br","co.nz","co.za","com.mx","co.id","com.sg"
 ]);
+
+/* ===========================================================
+   User's personal blocklist (this device only)
+   =========================================================== */
+const BLOCKLIST_KEY = "qrshield_blocklist_v1";
+
+function loadBlocklist(){
+  try {
+    const list = JSON.parse(localStorage.getItem(BLOCKLIST_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch(e){ return []; }
+}
+
+function persistBlocklist(list){
+  try { localStorage.setItem(BLOCKLIST_KEY, JSON.stringify(list)); }
+  catch(e){ /* storage unavailable — blocklist just won't persist this session */ }
+}
+
+function normalizeBlockEntry(input){
+  let t = (input || "").trim().toLowerCase();
+  if (!t) return null;
+  t = t.replace(/^https?:\/\//, "").replace(/^www\./, "");
+  t = t.split("/")[0].split("?")[0].split("#")[0];
+  return t || null;
+}
+
+function isDomainBlocked(hostname, root){
+  const list = loadBlocklist();
+  for (const entry of list) {
+    const d = entry.domain;
+    if (hostname === d || root === d || hostname.endsWith("." + d)) return d;
+  }
+  return null;
+}
 
 function levenshtein(a, b){
   const m = a.length, n = b.length;
@@ -292,6 +351,13 @@ function analyze(parsed){
       const hostname = url.hostname.toLowerCase();
       const root = hostnameRoot(hostname);
 
+      const blockedMatch = isDomainBlocked(hostname, root);
+      if (blockedMatch) {
+        critical = true;
+        add("high", 100, `You've manually blocked "${blockedMatch}" on this device — this code points to it.`);
+        advisory = "This domain is on your personal blocklist. Manage it from the Blocked URLs tab.";
+      }
+
       const isIpLogger = IP_LOGGERS.has(hostname) || IP_LOGGERS.has(root) ||
         Array.from(IP_LOGGERS).some(d => hostname === d || hostname.endsWith("." + d));
       if (isIpLogger) {
@@ -312,6 +378,38 @@ function analyze(parsed){
 
       if (hostname.includes("xn--")) {
         add("high", 38, "Uses an internationalized (punycode) domain — sometimes used to imitate a trusted brand with look-alike characters.");
+      } else if (/[^\x00-\x7f]/.test(hostname)) {
+        add("high", 40, "Domain contains non-standard (non-ASCII) characters — a common homograph trick to visually imitate a trusted domain.");
+      }
+
+      const doubleExtMatch = url.pathname.match(/\.([a-z0-9]{2,5})\.([a-z0-9]{2,5})$/i);
+      if (doubleExtMatch) {
+        const firstExt = doubleExtMatch[1].toLowerCase();
+        const lastExt = doubleExtMatch[2].toLowerCase();
+        if (DANGEROUS_EXTENSIONS.has(lastExt) && /^(pdf|docx?|jpe?g|png|gif|xlsx?|zip|txt|csv|mp3|mp4)$/i.test(firstExt)) {
+          add("high", 55, `Filename disguises a ${lastExt.toUpperCase()} file behind a fake ".${firstExt}" extension — a classic double-extension trick.`);
+        } else if (DANGEROUS_EXTENSIONS.has(lastExt)) {
+          add("high", 55, `Link points directly to a downloadable ${lastExt.toUpperCase()} file — this would run code or install something rather than open a page.`);
+        }
+      } else {
+        const singleExtMatch = url.pathname.match(/\.([a-z0-9]{2,5})$/i);
+        if (singleExtMatch && DANGEROUS_EXTENSIONS.has(singleExtMatch[1].toLowerCase())) {
+          add("high", 55, `Link points directly to a downloadable ${singleExtMatch[1].toUpperCase()} file — this would run code or install something rather than open a page.`);
+        }
+      }
+
+      let redirectTarget = null;
+      for (const p of REDIRECT_PARAMS) {
+        const v = url.searchParams.get(p);
+        if (v && /^https?:\/\//i.test(v)) { redirectTarget = v; break; }
+      }
+      if (redirectTarget) {
+        add("med", 24, `Contains a "${redirectTarget.length > 60 ? redirectTarget.slice(0,60) + "…" : redirectTarget}" redirect embedded in the link — where you actually land may differ from this domain.`);
+      }
+
+      const digitHeavySub = hostname.split(".").slice(0, -2).some(label => (label.match(/\d/g) || []).length >= 4);
+      if (digitHeavySub) {
+        add("med", 16, "Contains a subdomain packed with digits, a pattern common in auto-generated phishing infrastructure.");
       }
 
       const afterScheme = parsed.raw.replace(/^https?:\/\//i, "");
@@ -343,6 +441,16 @@ function analyze(parsed){
       for (const brand of BRANDS) {
         if (hostname === brand || hostname.endsWith("." + brand)) { knownBrand = true; break; }
       }
+
+      if (!knownBrand) {
+        for (const brand of BRANDS) {
+          if (hostname.includes(brand)) {
+            add("high", 52, `Contains "${brand}" embedded earlier in the address, while the actual domain is "${root}" — a common trick to make a fake link look legitimate at a glance.`);
+            break;
+          }
+        }
+      }
+
       if (!knownBrand) {
         const rootBase = root.split(".")[0] || "";
         const tokens = Array.from(new Set([rootBase, ...rootBase.split(/[-_]/)])).filter(t => t.length >= 4);
@@ -852,6 +960,77 @@ $("#clearHistoryBtn").addEventListener("click", () => {
 });
 
 /* ===========================================================
+   Blocked URLs view
+   =========================================================== */
+function renderBlockedList(){
+  const list = loadBlocklist();
+  const ul = $("#blockedList");
+  const empty = $("#blockedEmpty");
+  ul.querySelectorAll(".history-item").forEach(n => n.remove());
+
+  if (!list.length) {
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  list.slice().reverse().forEach(entry => {
+    const li = document.createElement("li");
+    li.className = "history-item blocked-item";
+    li.dataset.domain = entry.domain;
+    const when = new Date(entry.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    li.innerHTML = `
+      <span class="h-dot blocked-dot"></span>
+      <div class="h-body">
+        <div class="h-url">${escapeHtml(entry.domain)}</div>
+        <div class="h-time">Blocked ${when}</div>
+      </div>
+      <button class="h-fav" data-action="unblock" type="button" aria-label="Remove from blocklist">
+        <svg viewBox="0 0 24 24" width="15" height="15"><path fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>`;
+    ul.appendChild(li);
+  });
+}
+
+$("#blockAddBtn").addEventListener("click", () => {
+  const domain = normalizeBlockEntry($("#blockInput").value);
+  if (!domain) { toast("Enter a URL or domain to block."); return; }
+  const list = loadBlocklist();
+  if (list.some(e => e.domain === domain)) {
+    toast("Already on your blocklist.");
+    $("#blockInput").value = "";
+    return;
+  }
+  list.push({ domain, ts: Date.now() });
+  persistBlocklist(list);
+  $("#blockInput").value = "";
+  renderBlockedList();
+  toast(`Blocked "${domain}"`);
+});
+
+$("#blockInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("#blockAddBtn").click(); }
+});
+
+$("#blockedList").addEventListener("click", (e) => {
+  if (!e.target.closest('[data-action="unblock"]')) return;
+  const li = e.target.closest(".history-item");
+  if (!li) return;
+  const domain = li.dataset.domain;
+  const list = loadBlocklist().filter(entry => entry.domain !== domain);
+  persistBlocklist(list);
+  renderBlockedList();
+  toast("Removed from blocklist");
+});
+
+$("#clearBlocklistBtn").addEventListener("click", () => {
+  if (!confirm("Clear your entire blocklist?")) return;
+  persistBlocklist([]);
+  renderBlockedList();
+  toast("Blocklist cleared");
+});
+
+/* ===========================================================
    Settings toggles
    =========================================================== */
 const strictToggle = $("#strictToggle");
@@ -1055,6 +1234,7 @@ async function startScanning(){
   video.classList.add("is-live");
   $("#scannerIdle").classList.add("hidden");
   $("#scannerFrame").querySelector(".viewfinder").classList.add("is-active");
+  $("#scannerFrame").querySelector(".viewfinder").classList.remove("found");
   $("#startBtn").textContent = "Stop scanning";
   scanning = true;
   setupTorch();
@@ -1187,7 +1367,7 @@ function stopScanning(){
   const idle = $("#scannerIdle");
   if (idle) idle.classList.remove("hidden");
   const vf = $("#scannerFrame")?.querySelector(".viewfinder");
-  if (vf) vf.classList.remove("is-active");
+  if (vf) { vf.classList.remove("is-active"); vf.classList.remove("found"); }
   const startBtn = $("#startBtn");
   if (startBtn) startBtn.innerHTML = startBtnDefaultHTML;
 }
@@ -1217,19 +1397,28 @@ async function tick(){
     }
 
     if (content) {
-      stopScanning();
       const parsed = parseContent(content);
-      showAnalyzingState();
+      showFoundState();
       vibrate([15]);
-      const delay = 950; // matches the analyzing bar's CSS fill duration
       setTimeout(() => {
-        const result = analyze(parsed);
-        renderResult(parsed, result);
-      }, delay);
+        stopScanning();
+        showAnalyzingState();
+        setTimeout(() => {
+          const result = analyze(parsed);
+          renderResult(parsed, result);
+        }, 950); // matches the analyzing bar's CSS fill duration
+      }, 550); // lets the "found" lock-on animation play before moving on
       return;
     }
   }
   rafId = requestAnimationFrame(tick);
+}
+
+function showFoundState(){
+  scanning = false; // stop the detection loop but leave the camera visibly live
+  if (rafId) cancelAnimationFrame(rafId);
+  const vf = $("#scannerFrame")?.querySelector(".viewfinder");
+  if (vf) vf.classList.add("found");
 }
 
 function showAnalyzingState(){

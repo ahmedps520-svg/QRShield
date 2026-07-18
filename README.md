@@ -44,6 +44,11 @@ the *text* of the code against a local rule set:
 - plain HTTP instead of HTTPS
 - QR types that carry sensitive payloads: Wi-Fi passwords, contact cards,
   2FA/OTP secrets, app-launch (`intent:`) links
+- direct links to downloadable executable/script files, including the
+  classic "invoice.pdf.exe" double-extension disguise
+- homograph/mixed-script domains, embedded open-redirect parameters, and
+  brand names embedded as a fake subdomain prefix (e.g. `paypal.com.evil.win`)
+- your own personal blocklist (see below)
 
 Each check adds to a risk score; "Strict mode" (on by default, toggle in
 Settings) lowers the bar for flagging something as Caution or Dangerous.
@@ -60,6 +65,12 @@ entirely on-device (via the QRious library, loaded from a CDN — nothing you
 type is sent anywhere). Codes are rendered in plain black-on-white for
 maximum real-world scan reliability, regardless of the app's own theme.
 Download as PNG or copy the image directly.
+
+## Blocking domains yourself
+
+The Blocked tab lets you maintain a personal list of domains — anything on
+it makes QRShield flag matching QR codes as Dangerous automatically, on top
+of the built-in checks. Stored only on this device.
 
 ## Other settings
 

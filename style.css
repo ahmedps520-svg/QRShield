@@ -286,6 +286,39 @@ button{ font-family: inherit; }
   100%{ top: 94%; opacity:0; }
 }
 
+/* ---------- "found" lock-on state ---------- */
+
+.viewfinder.found .corner{
+  border-color: var(--green);
+  filter: drop-shadow(0 0 10px rgba(47,227,163,0.7));
+  animation: found-snap .5s var(--ease-out) both;
+}
+.viewfinder.found .scanline{ animation: none; opacity:0; }
+@keyframes found-snap{
+  0%{ transform: scale(1); }
+  35%{ transform: scale(0.88); }
+  60%{ transform: scale(1.06); }
+  100%{ transform: scale(1); }
+}
+
+.found-check{
+  position:absolute; top:50%; left:50%;
+  transform: translate(-50%,-50%) scale(0);
+  width:52px; height:52px; border-radius:50%;
+  background: rgba(47,227,163,0.16);
+  color: var(--green);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0;
+}
+.viewfinder.found .found-check{
+  animation: found-check-pop .5s var(--ease-out) both;
+}
+@keyframes found-check-pop{
+  0%{ opacity:0; transform: translate(-50%,-50%) scale(0.3); }
+  50%{ opacity:1; transform: translate(-50%,-50%) scale(1.15); }
+  100%{ opacity:1; transform: translate(-50%,-50%) scale(1); }
+}
+
 .scanner-controls{
   display:flex; flex-wrap:wrap; gap:10px; margin-top:16px;
 }
@@ -813,6 +846,12 @@ body.verdict-safe .result-actions #proceedBtn{ background: linear-gradient(135de
 /* ---------- history toolbar / export ---------- */
 
 .history-toolbar{ display:flex; gap:8px; margin-bottom:12px; }
+
+.block-add-row{ display:flex; gap:8px; margin-bottom:12px; }
+.block-add-row .history-search{ flex:1; }
+.block-add-row .btn{ flex:none; padding: 9px 18px; }
+.blocked-dot{ background: var(--red-000); box-shadow: 0 0 6px var(--red-glow); }
+.history-item.blocked-item .h-fav:hover{ color: var(--red-000); }
 .history-search{
   flex:1; font-family: var(--font-body); font-size:13.5px; color: var(--text-hi);
   background: rgba(255,255,255,0.03);
