@@ -593,6 +593,10 @@ function renderResult(parsed, result, options){
     proceedBtn.hidden = true;
   }
 
+  // Safe preview + Link X-Ray only make sense for web addresses.
+  $("#previewBtn").hidden = !["url","url-noscheme"].includes(parsed.type);
+  renderXray(parsed);
+
   document.body.classList.toggle("verdict-safe", result.verdict === "safe");
   showView("result");
 
@@ -640,13 +644,48 @@ function fireConfetti(){
   }
 }
 
+/* ---------- clean-link opening: strip trackers, prefer HTTPS ---------- */
+const TRACKING_PARAM_EXACT = new Set([
+  "fbclid","gclid","dclid","msclkid","yclid","twclid","ttclid","wbraid","gbraid",
+  "igshid","mc_eid","mkt_tok","oly_enc_id","oly_anon_id","vero_id","s_cid","icid",
+  "_hsenc","_hsmi","spm","ref_src","cmpid","soc_src","soc_trk","mc_cid","ml_subscriber",
+  "ml_subscriber_hash","rb_clickid","oicd","wickedid","irclickid"
+]);
+
+function isTrackingParam(name){
+  return /^utm_/i.test(name) || TRACKING_PARAM_EXACT.has(name.toLowerCase());
+}
+
+function sanitizeUrlForOpen(href){
+  const info = { href, removed: 0, upgraded: false };
+  let url;
+  try { url = new URL(href); } catch(e){ return info; }
+  if (getSetting("stripTrackers", true)) {
+    const toDelete = [];
+    url.searchParams.forEach((v, k) => { if (isTrackingParam(k)) toDelete.push(k); });
+    toDelete.forEach(k => url.searchParams.delete(k));
+    info.removed = toDelete.length;
+  }
+  if (getSetting("httpsUpgrade", true) && url.protocol === "http:") {
+    url.protocol = "https:";
+    info.upgraded = true;
+  }
+  info.href = url.toString();
+  return info;
+}
+
 $("#proceedBtn").addEventListener("click", () => {
   if (!lastParsed) return;
   const goingOut = () => {
     try {
       if (["url","url-noscheme"].includes(lastParsed.type)) {
         const href = lastParsed.type === "url" ? lastParsed.raw : "https://" + lastParsed.raw;
-        window.open(href, "_blank", "noopener,noreferrer");
+        const cleaned = sanitizeUrlForOpen(href);
+        window.open(cleaned.href, "_blank", "noopener,noreferrer");
+        const notes = [];
+        if (cleaned.removed) notes.push(cleaned.removed + " tracking parameter" + (cleaned.removed === 1 ? "" : "s") + " removed");
+        if (cleaned.upgraded) notes.push("upgraded to HTTPS");
+        if (notes.length) toast("Opened — " + notes.join(", "));
       } else {
         window.location.href = lastParsed.raw;
       }
@@ -664,6 +703,87 @@ $("#proceedBtn").addEventListener("click", () => {
     if (!ok) return;
   }
   goingOut();
+});
+
+$("#shareBtn").addEventListener("click", async () => {
+  if (!lastParsed || !lastAnalysis) return;
+  const text = "QRShield scan — " + VERDICT_META[lastAnalysis.verdict].title +
+    " (risk " + lastAnalysis.score + "/100, confidence " + lastAnalysis.confidence + "%)\n\n" +
+    lastParsed.raw;
+  if (navigator.share) {
+    try { await navigator.share({ title: "QRShield scan result", text }); } catch(e){ /* user cancelled */ }
+  } else {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Result copied — paste it anywhere to share");
+    } catch(e){ toast("Sharing isn't supported in this browser."); }
+  }
+});
+
+/* ===========================================================
+   Link X-Ray — a fully local breakdown of the address
+   =========================================================== */
+function safeDecode(str){
+  try { return decodeURIComponent(str); } catch(e){ return str; }
+}
+
+function xrayRow(label, value, flag, flagSev){
+  const row = document.createElement("div");
+  row.className = "xray-row";
+  const l = document.createElement("span");
+  l.className = "xray-label";
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.className = "xray-value";
+  v.textContent = value;
+  row.appendChild(l);
+  row.appendChild(v);
+  if (flag) {
+    const f = document.createElement("span");
+    f.className = "xray-flag " + (flagSev || "med");
+    f.textContent = flag;
+    row.appendChild(f);
+  }
+  return row;
+}
+
+function renderXray(parsed){
+  const block = $("#xrayBlock");
+  const content = $("#xrayContent");
+  content.innerHTML = "";
+  content.hidden = true;
+  const toggle = $("#xrayToggle");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.classList.remove("is-open");
+
+  if (!["url","url-noscheme"].includes(parsed.type)) { block.hidden = true; return; }
+  let url;
+  try { url = new URL(parsed.type === "url" ? parsed.raw : "https://" + parsed.raw); }
+  catch(e){ block.hidden = true; return; }
+  block.hidden = false;
+
+  content.appendChild(xrayRow("Scheme", url.protocol.replace(":", ""),
+    url.protocol === "http:" ? "unencrypted" : null, "high"));
+  content.appendChild(xrayRow("Host", url.hostname,
+    url.hostname.includes("xn--") ? "punycode" : null, "high"));
+  if (url.username) content.appendChild(xrayRow("Credentials", "embedded before the host", "decoy trick", "high"));
+  if (url.port) content.appendChild(xrayRow("Port", url.port, "non-standard", "med"));
+  if (url.pathname && url.pathname !== "/") content.appendChild(xrayRow("Path", safeDecode(url.pathname)));
+  url.searchParams.forEach((v, k) => {
+    let flag = null, sev = "med";
+    if (isTrackingParam(k)) { flag = "tracker"; }
+    else if (REDIRECT_PARAMS.includes(k.toLowerCase()) && /^https?:\/\//i.test(v)) { flag = "hidden redirect"; sev = "high"; }
+    content.appendChild(xrayRow("Param · " + k, safeDecode(v) || "(empty)", flag, sev));
+  });
+  if (url.hash) content.appendChild(xrayRow("Fragment", safeDecode(url.hash.slice(1))));
+}
+
+$("#xrayToggle").addEventListener("click", () => {
+  const content = $("#xrayContent");
+  content.hidden = !content.hidden;
+  const toggle = $("#xrayToggle");
+  toggle.setAttribute("aria-expanded", String(!content.hidden));
+  toggle.classList.toggle("is-open", !content.hidden);
 });
 
 $("#copyBtn").addEventListener("click", async () => {
@@ -1036,12 +1156,18 @@ $("#clearBlocklistBtn").addEventListener("click", () => {
 const strictToggle = $("#strictToggle");
 const hapticToggle = $("#hapticToggle");
 const soundToggle = $("#soundToggle");
+const stripTrackersToggle = $("#stripTrackersToggle");
+const httpsUpgradeToggle = $("#httpsUpgradeToggle");
 strictToggle.checked = getSetting("strict", true);
 hapticToggle.checked = getSetting("haptic", true);
 soundToggle.checked = getSetting("sound", true);
+stripTrackersToggle.checked = getSetting("stripTrackers", true);
+httpsUpgradeToggle.checked = getSetting("httpsUpgrade", true);
 strictToggle.addEventListener("change", () => setSetting("strict", strictToggle.checked));
 hapticToggle.addEventListener("change", () => setSetting("haptic", hapticToggle.checked));
 soundToggle.addEventListener("change", () => setSetting("sound", soundToggle.checked));
+stripTrackersToggle.addEventListener("change", () => setSetting("stripTrackers", stripTrackersToggle.checked));
+httpsUpgradeToggle.addEventListener("change", () => setSetting("httpsUpgrade", httpsUpgradeToggle.checked));
 
 /* ===========================================================
    Scan feedback sounds (synthesized — no audio file needed)
@@ -1430,6 +1556,8 @@ function showAnalyzingState(){
   $("#reasonsList").innerHTML = "";
   $("#advisoryBlock").hidden = true;
   $("#proceedBtn").hidden = true;
+  $("#previewBtn").hidden = true;
+  $("#xrayBlock").hidden = true;
   document.body.classList.remove("verdict-safe");
 
   const bar = $("#analyzingBar");
@@ -1492,6 +1620,369 @@ $("#fileInput").addEventListener("change", async (e) => {
   img.src = url;
   e.target.value = "";
 });
+
+/* ===========================================================
+   Paste-to-check — analyze any link or text without a camera
+   =========================================================== */
+const checkLinkInput = $("#checkLinkInput");
+
+function checkPastedContent(){
+  const value = checkLinkInput.value.trim();
+  if (!value) { toast("Paste a link or some text first."); return; }
+  checkLinkInput.value = "";
+  checkLinkInput.blur();
+  const parsed = parseContent(value);
+  stopScanning();
+  showAnalyzingState();
+  setTimeout(() => {
+    const result = analyze(parsed);
+    renderResult(parsed, result);
+  }, 950); // matches the analyzing bar's CSS fill duration
+}
+
+$("#checkLinkBtn").addEventListener("click", checkPastedContent);
+checkLinkInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); checkPastedContent(); }
+});
+
+/* ===========================================================
+   Safe Preview — read the destination WITHOUT touching it.
+
+   The fetch is performed by a public anonymizing relay, so the
+   destination server sees the relay's IP address — never this
+   device's. The request carries no cookies and no referrer, and
+   whatever comes back is parsed with DOMParser (inert: scripts
+   never execute, images and subresources never load) and rendered
+   as escaped plain text only. The page's own CSP additionally
+   blocks every network destination except the two relays.
+   =========================================================== */
+const PREVIEW_TIMEOUT_MS = 14000;
+let previewAbort = null;
+
+function previewTargetHref(){
+  if (!lastParsed || !["url","url-noscheme"].includes(lastParsed.type)) return null;
+  return lastParsed.type === "url" ? lastParsed.raw : "https://" + lastParsed.raw;
+}
+
+function openPreviewSheet(){
+  const backdrop = $("#previewBackdrop");
+  const sheet = $("#previewSheet");
+  backdrop.hidden = false;
+  sheet.hidden = false;
+  void sheet.offsetWidth; // force reflow so the slide-up transition actually runs
+  backdrop.classList.add("is-open");
+  sheet.classList.add("is-open");
+  document.body.classList.add("sheet-locked");
+  runPreview();
+}
+
+function closePreviewSheet(){
+  if (previewAbort) { previewAbort.abort(); previewAbort = null; }
+  $("#previewBackdrop").classList.remove("is-open");
+  $("#previewSheet").classList.remove("is-open");
+  document.body.classList.remove("sheet-locked");
+  setTimeout(() => {
+    $("#previewBackdrop").hidden = true;
+    $("#previewSheet").hidden = true;
+  }, 280); // matches the sheet's slide-down transition
+}
+
+$("#previewBtn").addEventListener("click", openPreviewSheet);
+$("#previewCloseBtn").addEventListener("click", closePreviewSheet);
+$("#previewBackdrop").addEventListener("click", closePreviewSheet);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#previewSheet").hidden) closePreviewSheet();
+});
+
+/* ---------- relay fetchers ---------- */
+async function fetchViaAllOrigins(target, signal){
+  const res = await fetch("https://api.allorigins.win/get?url=" + encodeURIComponent(target), {
+    signal, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store"
+  });
+  if (!res.ok) throw new Error("relay HTTP " + res.status);
+  const data = await res.json();
+  if (!data || typeof data.contents !== "string" || !data.contents) throw new Error("empty relay response");
+  return { html: data.contents, via: "AllOrigins relay" };
+}
+
+async function fetchViaJina(target, signal){
+  const res = await fetch("https://r.jina.ai/" + target, {
+    signal, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store"
+  });
+  if (!res.ok) throw new Error("relay HTTP " + res.status);
+  const text = await res.text();
+  if (!text) throw new Error("empty relay response");
+  return { text, via: "Jina reader relay" };
+}
+
+/* ---------- inspect fetched HTML (inert, local) ---------- */
+function inspectFetchedHtml(html, targetHref){
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const attr = (sel, name) => {
+    const el = doc.querySelector(sel);
+    return el ? (el.getAttribute(name) || "").trim() : "";
+  };
+
+  const title = (doc.title || "").trim() || attr('meta[property="og:title"]', "content");
+  const description = attr('meta[name="description"]', "content") || attr('meta[property="og:description"]', "content");
+  const canonical = attr('link[rel="canonical"]', "href") || attr('meta[property="og:url"]', "content");
+
+  let metaRefreshUrl = null;
+  const mr = doc.querySelector('meta[http-equiv="refresh" i]');
+  if (mr) {
+    const m = /url\s*=\s*['"]?([^'">\s]+)/i.exec(mr.getAttribute("content") || "");
+    if (m) metaRefreshUrl = m[1];
+  }
+
+  const passwordInputs = doc.querySelectorAll('input[type="password"]').length;
+  const forms = doc.querySelectorAll("form").length;
+  const extScripts = doc.querySelectorAll("script[src]").length;
+  const iframes = doc.querySelectorAll("iframe").length;
+
+  const domainCounts = {};
+  doc.querySelectorAll("a[href]").forEach(a => {
+    try {
+      const u = new URL(a.getAttribute("href"), targetHref);
+      if (/^https?:$/.test(u.protocol)) domainCounts[u.hostname] = (domainCounts[u.hostname] || 0) + 1;
+    } catch(e){ /* unparseable href */ }
+  });
+
+  doc.querySelectorAll("script,style,noscript,template").forEach(n => n.remove());
+  const excerpt = (doc.body ? doc.body.textContent : "").replace(/\s+/g, " ").trim().slice(0, 700);
+
+  return { title, description, canonical, metaRefreshUrl, passwordInputs, forms, extScripts, iframes, domainCounts, excerpt };
+}
+
+function buildPreviewSignals(inspection, targetHref){
+  const signals = []; // {sev, text}
+  let targetRoot = "";
+  try { targetRoot = hostnameRoot(new URL(targetHref).hostname.toLowerCase()); } catch(e){}
+
+  if (inspection.passwordInputs > 0) {
+    signals.push({ sev: "high", text: "The page contains a password / login form. If you weren't expecting to sign in here, treat it as a phishing page." });
+  }
+  if (inspection.metaRefreshUrl) {
+    signals.push({ sev: "high", text: "The page auto-redirects visitors to: " + truncate(inspection.metaRefreshUrl, 90) });
+  }
+  if (inspection.canonical) {
+    try {
+      const canonRoot = hostnameRoot(new URL(inspection.canonical, targetHref).hostname.toLowerCase());
+      if (targetRoot && canonRoot && canonRoot !== targetRoot) {
+        signals.push({ sev: "med", text: 'The page identifies itself as belonging to "' + canonRoot + '" — a different site than the address you scanned.' });
+      }
+    } catch(e){ /* bad canonical URL */ }
+  }
+  if (inspection.forms > 0 && inspection.passwordInputs === 0) {
+    signals.push({ sev: "low", text: "Contains " + inspection.forms + " form" + (inspection.forms === 1 ? "" : "s") + " that would submit data if filled in." });
+  }
+  if (inspection.iframes > 0) {
+    signals.push({ sev: "low", text: "Embeds " + inspection.iframes + " frame" + (inspection.iframes === 1 ? "" : "s") + " loading other pages inside it." });
+  }
+  if (inspection.extScripts > 12) {
+    signals.push({ sev: "low", text: "Loads an unusually high number of external scripts (" + inspection.extScripts + ")." });
+  }
+  if (!signals.length) {
+    signals.push({ sev: "ok", text: "No login form, auto-redirect, or identity mismatch found in the fetched page." });
+  }
+  return signals;
+}
+
+/* ---------- preview rendering (textContent only — never innerHTML) ---------- */
+function pvSection(labelText){
+  const wrap = document.createElement("div");
+  wrap.className = "pv-section";
+  const label = document.createElement("span");
+  label.className = "content-label";
+  label.textContent = labelText;
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function showPreviewLoading(target){
+  const body = $("#previewBody");
+  body.innerHTML = "";
+  const chip = document.createElement("div");
+  chip.className = "pv-relay-chip";
+  chip.textContent = "Relay is fetching " + truncate(target, 70) + " …";
+  body.appendChild(chip);
+  for (let i = 0; i < 4; i++) {
+    const sk = document.createElement("div");
+    sk.className = "pv-skeleton" + (i === 0 ? " wide" : "");
+    body.appendChild(sk);
+  }
+}
+
+function showPreviewError(message){
+  if ($("#previewSheet").hidden) return;
+  const body = $("#previewBody");
+  body.innerHTML = "";
+  const err = document.createElement("div");
+  err.className = "pv-error";
+  const p = document.createElement("p");
+  p.textContent = message;
+  err.appendChild(p);
+  const retry = document.createElement("button");
+  retry.className = "btn btn-outline";
+  retry.textContent = "Try again";
+  retry.addEventListener("click", runPreview);
+  err.appendChild(retry);
+  body.appendChild(err);
+}
+
+function renderPreviewCommon(body, via, finalUrl, targetHref){
+  const chip = document.createElement("div");
+  chip.className = "pv-relay-chip ok";
+  chip.textContent = "Fetched anonymously via " + via + " — your IP was never sent to the site";
+  body.appendChild(chip);
+
+  const dest = pvSection("Destination");
+  const destVal = document.createElement("div");
+  destVal.className = "content-value pv-dest";
+  destVal.textContent = finalUrl || targetHref;
+  dest.appendChild(destVal);
+  body.appendChild(dest);
+}
+
+function renderPreviewMeta(body, title, description){
+  const sec = pvSection("What the page says it is");
+  const t = document.createElement("p");
+  t.className = "pv-page-title";
+  t.textContent = title || "(no title)";
+  sec.appendChild(t);
+  if (description) {
+    const d = document.createElement("p");
+    d.className = "pv-page-desc";
+    d.textContent = description;
+    sec.appendChild(d);
+  }
+  body.appendChild(sec);
+}
+
+function renderPreviewSignals(body, signals){
+  const sec = pvSection("Page inspection");
+  const ul = document.createElement("ul");
+  ul.className = "pv-signals";
+  signals.forEach(s => {
+    const li = document.createElement("li");
+    li.className = "sev-" + s.sev;
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    const txt = document.createElement("span");
+    txt.textContent = s.text;
+    li.appendChild(tag);
+    li.appendChild(txt);
+    ul.appendChild(li);
+  });
+  sec.appendChild(ul);
+  body.appendChild(sec);
+}
+
+function renderPreviewExcerpt(body, excerpt){
+  if (!excerpt) return;
+  const sec = pvSection("Page text (first part, scripts stripped)");
+  const p = document.createElement("p");
+  p.className = "pv-excerpt";
+  p.textContent = excerpt + (excerpt.length >= 700 ? " …" : "");
+  sec.appendChild(p);
+  body.appendChild(sec);
+}
+
+function renderPreviewFromHtml(result, targetHref){
+  if ($("#previewSheet").hidden) return;
+  const inspection = inspectFetchedHtml(result.html, targetHref);
+  const body = $("#previewBody");
+  body.innerHTML = "";
+
+  renderPreviewCommon(body, result.via, inspection.canonical || null, targetHref);
+  renderPreviewMeta(body, inspection.title, inspection.description);
+  renderPreviewSignals(body, buildPreviewSignals(inspection, targetHref));
+  renderPreviewExcerpt(body, inspection.excerpt);
+
+  const topDomains = Object.entries(inspection.domainCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (topDomains.length) {
+    const sec = pvSection("Where its links point");
+    const wrap = document.createElement("div");
+    wrap.className = "pv-linkmap";
+    topDomains.forEach(([domain, count]) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "top-domain-row";
+      const d = document.createElement("span");
+      d.textContent = domain;
+      const c = document.createElement("span");
+      c.className = "count";
+      c.textContent = String(count);
+      rowEl.appendChild(d);
+      rowEl.appendChild(c);
+      wrap.appendChild(rowEl);
+    });
+    sec.appendChild(wrap);
+    body.appendChild(sec);
+  }
+}
+
+function renderPreviewFromJina(result, targetHref){
+  if ($("#previewSheet").hidden) return;
+  const text = result.text;
+  const titleM = /^Title:\s*(.+)$/m.exec(text);
+  const urlM = /^URL Source:\s*(\S+)/m.exec(text);
+  let content = text;
+  const idx = text.indexOf("Markdown Content:");
+  if (idx !== -1) content = text.slice(idx + "Markdown Content:".length);
+  const excerpt = content.replace(/\s+/g, " ").trim().slice(0, 700);
+
+  const body = $("#previewBody");
+  body.innerHTML = "";
+  const finalUrl = urlM ? urlM[1] : null;
+  renderPreviewCommon(body, result.via, finalUrl, targetHref);
+
+  // A shortener's real destination is the single most useful fact here.
+  if (finalUrl) {
+    try {
+      const finalRoot = hostnameRoot(new URL(finalUrl).hostname.toLowerCase());
+      const targetRoot = hostnameRoot(new URL(targetHref).hostname.toLowerCase());
+      if (finalRoot !== targetRoot) {
+        renderPreviewSignals(body, [{ sev: "med", text: 'This link actually leads to "' + finalRoot + '", not the domain shown in the code.' }]);
+      }
+    } catch(e){ /* unparseable final URL */ }
+  }
+
+  renderPreviewMeta(body, titleM ? titleM[1].trim() : null, null);
+  renderPreviewExcerpt(body, excerpt);
+}
+
+async function runPreview(){
+  const target = previewTargetHref();
+  if (!target) return;
+  if (!/^https?:\/\//i.test(target)) { showPreviewError("Only web links can be previewed."); return; }
+  if (!navigator.onLine) { showPreviewError("Safe Preview needs an internet connection — you're offline right now."); return; }
+
+  showPreviewLoading(target);
+  previewAbort = new AbortController();
+  const signal = previewAbort.signal;
+  const timeout = setTimeout(() => { if (previewAbort) previewAbort.abort(); }, PREVIEW_TIMEOUT_MS);
+
+  try {
+    let rendered = false;
+    try {
+      const r = await fetchViaAllOrigins(target, signal);
+      renderPreviewFromHtml(r, target);
+      rendered = true;
+    } catch(e){
+      if (signal.aborted) throw e; // timed out / closed — don't bother the fallback
+    }
+    if (!rendered) {
+      const r = await fetchViaJina(target, signal);
+      renderPreviewFromJina(r, target);
+    }
+  } catch(e){
+    showPreviewError(signal.aborted
+      ? "The relay took too long to answer. Try again in a moment."
+      : "Neither preview relay could fetch this page right now. The site may be down, or it may block relays.");
+  } finally {
+    clearTimeout(timeout);
+    previewAbort = null;
+  }
+}
 
 /* ===========================================================
    Service worker registration (offline shell, no push)

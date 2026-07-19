@@ -1,8 +1,37 @@
-# QRShield
+# QRShield — version 13.46
 
 An installable PWA that scans a QR code and runs an on-device safety check
 before you ever open whatever it points to. No accounts, no notifications,
 no analytics, no server component — every check happens in the browser.
+
+## New in 13.46
+
+- **Safe Preview** — read a link's destination page *before* opening it,
+  without your device ever contacting the site. A public anonymizing relay
+  (AllOrigins, with Jina Reader as fallback) fetches the page, so the
+  destination sees the relay's IP address — never yours — and receives no
+  cookies, no referrer, and nothing identifying. The result is parsed with
+  an inert `DOMParser` and rendered as escaped plain text: no scripts run,
+  no images load, nothing from the page can make a network request.
+  The preview also inspects the fetched page for phishing signals (password
+  / login forms, meta-refresh auto-redirects, canonical-domain mismatches)
+  and, for shortened links, reveals where they actually lead.
+  Honest fine print: the relay itself sees the URL being previewed —
+  previews only run when you tap the button, never automatically.
+- **Link X-Ray** — every URL result can be broken down into scheme, host,
+  port, decoded path, and each decoded query parameter, with trackers and
+  hidden-redirect parameters flagged inline.
+- **Clean opening** — before a link opens, tracking parameters (`utm_*`,
+  `fbclid`, `gclid`, and ~30 more) are stripped and plain `http://` links
+  are upgraded to `https://` (both toggleable in Settings).
+- **Paste to check** — paste any link or text on the Scan tab to analyze it
+  without needing a camera or a printed code.
+- **Share results** via the system share sheet (or clipboard fallback).
+- **Hardened shell** — a strict Content-Security-Policy meta tag now blocks
+  every network destination except the app's own files, the two pinned QR
+  libraries, and the two preview relays; frames, objects, and form
+  submissions are disabled entirely, and a `no-referrer` policy means the
+  app never leaks where you came from.
 
 ## Files
 

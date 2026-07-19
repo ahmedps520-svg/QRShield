@@ -4,7 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>QRShield — Scan &amp; Verify</title>
-<meta name="description" content="Scan any QR code and get an instant, on-device safety check before you ever open the link." />
+<meta name="description" content="Scan any QR code and get an instant, on-device safety check — plus an anonymous Safe Preview — before you ever open the link." />
+
+<!-- Content-Security-Policy: only this app's own files, the two pinned QR
+     libraries, and the two anonymous preview relays may ever be contacted.
+     Everything else (frames, objects, forms, arbitrary connections) is
+     blocked at the browser level, so even injected markup can't phone home. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.allorigins.win https://r.jina.ai; manifest-src 'self'; worker-src 'self'; font-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'" />
+<!-- Never leak the page you came from — to anyone, ever. -->
+<meta name="referrer" content="no-referrer" />
 
 <link rel="manifest" href="manifest.json" />
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
@@ -38,6 +46,7 @@
         </svg>
       </span>
       <span class="brand-name">QR<em>Shield</em></span>
+      <span class="brand-ver">v13.46</span>
     </div>
     <div class="topbar-status">
       <div class="status-chip offline-badge" id="offlineBadge" hidden>
@@ -103,6 +112,14 @@
         <input type="file" id="fileInput" accept="image/*" hidden />
       </div>
 
+      <div class="checklink-row">
+        <input type="text" id="checkLinkInput" class="history-search" placeholder="…or paste a link or text to check" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button class="btn btn-ghost checklink-btn" id="checkLinkBtn">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l7 3v6c0 5-3.4 8.7-7 11-3.6-2.3-7-6-7-11V5l7-3zm-1.2 12.6l-2.3-2.3-1.4 1.4 3.7 3.7 6-6-1.4-1.4-4.6 4.6z"/></svg>
+          Check
+        </button>
+      </div>
+
       <p class="privacy-note">
         <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 2l7 3v6c0 5-3.4 8.7-7 11-3.6-2.3-7-6-7-11V5l7-3z"/></svg>
         Scanning and analysis happen entirely on this device. QRShield never contacts the destination automatically — that would expose your IP to it first.
@@ -153,13 +170,31 @@
         <p id="advisoryText"></p>
       </div>
 
+      <div class="xray-block" id="xrayBlock" hidden>
+        <button class="xray-toggle" id="xrayToggle" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 4.5C7 4.5 2.7 7.6 1 12c1.7 4.4 6 7.5 11 7.5s9.3-3.1 11-7.5c-1.7-4.4-6-7.5-11-7.5zm0 12.5a5 5 0 110-10 5 5 0 010 10zm0-8a3 3 0 100 6 3 3 0 000-6z"/></svg>
+          <span>Link X-Ray — see every piece of this address</span>
+          <svg class="xray-chevron" viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z"/></svg>
+        </button>
+        <div class="xray-content" id="xrayContent" hidden></div>
+      </div>
+
       <div class="result-actions">
+        <button class="btn btn-outline btn-preview" id="previewBtn" hidden>
+          <svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M12 2l7 3v6c0 5-3.4 8.7-7 11-3.6-2.3-7-6-7-11V5l7-3zm0 5.5A4.5 4.5 0 1016.5 12 4.5 4.5 0 0012 7.5zm0 2A2.5 2.5 0 119.5 12 2.5 2.5 0 0112 9.5z"/></svg>
+          Safe preview
+        </button>
+        <button class="btn btn-primary" id="proceedBtn">Open anyway</button>
+      </div>
+      <div class="result-actions secondary">
         <button class="btn btn-icon" id="favoriteBtn" aria-label="Favorite this scan" title="Favorite this scan">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 17.3 6.2 21l1.6-6.7L2 9.7l6.9-.6L12 2.5l3.1 6.6 6.9.6-5.8 4.6L17.8 21z"/></svg>
         </button>
+        <button class="btn btn-icon" id="shareBtn" aria-label="Share this result" title="Share this result">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M18 16.1a3 3 0 00-2.1.9l-7-4.1a3.4 3.4 0 000-1.8l7-4.1a3 3 0 10-1-1.7l-7 4.1a3 3 0 100 5.2l7 4.2a3 3 0 101.1-2.7z"/></svg>
+        </button>
         <button class="btn btn-ghost" id="copyBtn">Copy content</button>
         <button class="btn btn-outline" id="rescanBtn">Scan another</button>
-        <button class="btn btn-primary" id="proceedBtn">Open anyway</button>
       </div>
 
     </section>
@@ -310,6 +345,24 @@
       </div>
 
       <div class="settings-group">
+        <h3>Opening links</h3>
+        <label class="switch-row">
+          <div>
+            <span class="switch-label">Strip tracking parameters</span>
+            <span class="switch-help">Remove utm_, fbclid, gclid and similar identifiers before a link opens, so it can't tag you personally.</span>
+          </div>
+          <span class="switch"><input type="checkbox" id="stripTrackersToggle" checked /><span class="slider"></span></span>
+        </label>
+        <label class="switch-row">
+          <div>
+            <span class="switch-label">Prefer HTTPS</span>
+            <span class="switch-help">Upgrade plain http:// links to encrypted https:// when opening. Turn off only if a site you trust breaks.</span>
+          </div>
+          <span class="switch"><input type="checkbox" id="httpsUpgradeToggle" checked /><span class="slider"></span></span>
+        </label>
+      </div>
+
+      <div class="settings-group">
         <h3>How QRShield decides</h3>
         <p class="about-text">
           Every scan is checked against on-device rules only: link structure, lookalike domains, link-shorteners that hide
@@ -322,8 +375,31 @@
       </div>
 
       <div class="settings-group">
+        <h3>How Safe Preview protects you</h3>
+        <p class="about-text">
+          Safe Preview never lets your device touch the destination. When you tap it, a public anonymizing relay
+          fetches the page instead — so the site sees the relay's IP address, not yours, and receives no cookies,
+          no referrer, and nothing that identifies you. What comes back is shown as plain, script-free text:
+          nothing from the page can run, load images, or make network requests here. Honest fine print: the relay
+          service itself does see the link you're previewing (that's how it fetches it) — previews only happen
+          when you tap the button, never automatically.
+        </p>
+      </div>
+
+      <div class="settings-group">
+        <h3>What's new in 13.46</h3>
+        <ul class="whatsnew-list">
+          <li><strong>Safe Preview</strong> — read a link's page through an anonymous relay before opening it. No IP, no cookies, no scripts.</li>
+          <li><strong>Link X-Ray</strong> — every result can break the address into scheme, host, path and each decoded parameter, with flags.</li>
+          <li><strong>Tracker stripping &amp; HTTPS upgrade</strong> — links open cleaned of personal identifiers, encrypted when possible.</li>
+          <li><strong>Paste to check</strong> — analyze any link or text without scanning a code.</li>
+          <li><strong>Share results</strong> and a hardened app: a strict Content-Security-Policy now blocks every unexpected network destination.</li>
+        </ul>
+      </div>
+
+      <div class="settings-group">
         <h3>About</h3>
-        <p class="about-text">QRShield · version 8.5 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
+        <p class="about-text">QRShield · version 13.46 · Installable, offline-capable, no accounts, no notifications, no tracking.</p>
       </div>
 
     </section>
@@ -366,6 +442,30 @@
     <button class="btn-tiny btn-tiny-primary" id="installNudgeInstall">Install</button>
   </div>
 </div>
+
+<div class="sheet-backdrop" id="previewBackdrop" hidden></div>
+<section class="preview-sheet" id="previewSheet" role="dialog" aria-modal="true" aria-label="Safe link preview" hidden>
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <header class="sheet-header">
+    <div class="sheet-title">
+      <span class="sheet-title-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l7 3v6c0 5-3.4 8.7-7 11-3.6-2.3-7-6-7-11V5l7-3zm0 5.5A4.5 4.5 0 1016.5 12 4.5 4.5 0 0012 7.5zm0 2A2.5 2.5 0 119.5 12 2.5 2.5 0 0112 9.5z"/></svg>
+      </span>
+      <div>
+        <h2>Safe preview</h2>
+        <p>Fetched by an anonymous relay — this device never contacts the site.</p>
+      </div>
+    </div>
+    <button class="btn btn-icon sheet-close" id="previewCloseBtn" aria-label="Close preview">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </header>
+  <div class="sheet-body" id="previewBody"></div>
+  <footer class="sheet-footnote">
+    The destination only ever sees the relay's IP address — never yours. No cookies, no referrer,
+    and no scripts from the page can run in this preview.
+  </footer>
+</section>
 
 <div class="toast" id="toast"></div>
 
